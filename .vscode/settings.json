@@ -129,4 +129,14 @@
         "yaml.schemas": {
                 "${workspaceFolder}/validation/module_schema.yaml": "${workspaceFolder}/src/modules/*/module.yaml"
         },
+        "python.autoComplete.extraPaths": [
+                "/home/amiao/ws_ros2/install/px4_ros_com/lib/python3.12/site-packages",
+                "/home/amiao/ws_ros2/install/px4_msgs/lib/python3.12/site-packages",
+                "/opt/ros/jazzy/lib/python3.12/site-packages"
+        ],
+        "python.analysis.extraPaths": [
+                "/home/amiao/ws_ros2/install/px4_ros_com/lib/python3.12/site-packages",
+                "/home/amiao/ws_ros2/install/px4_msgs/lib/python3.12/site-packages",
+                "/opt/ros/jazzy/lib/python3.12/site-packages"
+        ],
 }

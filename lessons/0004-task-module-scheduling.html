@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 4 课 · 正式模块与调度(start / stop / status)</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 4 课 · 正式模块与调度</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-01 · 约 30 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0003-gazebo-sitl-data-debugging.html">第 3 课</a> · 骨架速查:<a href="../reference/module-anatomy.html">模块解剖</a>
+</div>
+
+<p>到目前为止,你的 <code>my_first_app</code> 是个"一次性命令":跑完就退出。但 PX4 里真正干活的模块(ekf2、mc_att_control……)都是<strong>常驻后台、可启动、可停止、可查询状态</strong>的。这一课就把你的小工具升级成这种"正经模块",对应官方 <a href="https://docs.px4.io/v1.17/en/modules/module_template.html">Application/Module Template</a>。仓库里的模板源码是 <code>src/templates/template_module/</code>——本课代码就是它的简化版。</p>
+
+<h2>一、一个 PX4 模块的"活法"</h2>
+
+<p>模块有三种存在方式,按重量级递增:</p>
+
+<table class="map">
+<tr><th>方式</th><th>特点</th><th>适用</th><th>例子</th></tr>
+<tr><td>一次性命令</td><td>跑完 main 就退出</td><td>工具、测试</td><td>第 2 课的 my_first_app(旧版)</td></tr>
+<tr><td>后台任务 (task)</td><td>独立线程,<code>start</code>/<code>stop</code>/<code>status</code></td><td>大多数模块</td><td>ekf2、template_module</td></tr>
+<tr><td>工作队列项 (work item)</td><td>共享队列线程,按周期被唤醒</td><td>轻量、周期任务</td><td>load_mon、battery_status、work_item 示例</td></tr>
+</table>
+
+<p>实现上,它们都建立在同一个基类上:<code>ModuleBase&lt;T&gt;</code>(<code>px4_platform_common/module.h</code>)。你只需填五个"槽",命令行三件套自动获得:</p>
+
+<table class="map">
+<tr><th>你实现的</th><th>职责</th></tr>
+<tr><td><code>task_spawn()</code></td><td>创建任务线程(<code>px4_task_spawn_cmd</code>),把 <code>run()</code> 挂上去</td></tr>
+<tr><td><code>instantiate()</code></td><td>解析参数,<code>new</code> 出模块对象</td></tr>
+<tr><td><code>run()</code></td><td><strong>主循环</strong>,用 <code>while (!should_exit())</code> 包住,<code>stop</code> 时被优雅打断</td></tr>
+<tr><td><code>custom_command()</code></td><td>你自己的子命令(本课用不到)</td></tr>
+<tr><td><code>print_usage()</code> / <code>print_status()</code></td><td>帮助文本 / <code>status</code> 时打印运行状态</td></tr>
+</table>
+
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app          <span class="comment"># 无参数 → ModuleBase 打印用法(print_usage)</span>
+<span class="prompt">pxh&gt;</span> my_first_app start    <span class="comment"># task_spawn → run() 在后台线程跑起来</span>
+<span class="prompt">pxh&gt;</span> my_first_app status   <span class="comment"># print_status()</span>
+<span class="prompt">pxh&gt;</span> my_first_app stop     <span class="comment"># should_exit() 变 true,run() 退出</span></code></pre>
+
+<h2>二、动手:重写 my_first_app 为 C++ 模块</h2>
+
+<div class="card warn">
+<strong>⚠️ 语言切换提醒:</strong>work queue 和 ModuleBase 都是 C++ 的,所以模块改用 C++ 编写(文件后缀 <code>.cpp</code>)。语法别担心——本课代码量很小,你只需要"照抄 + 看懂结构",C++ 细节遇到再学。
+</div>
+
+<ol class="steps">
+<li>
+<p>删除旧 C 文件,新建头文件 <code>src/examples/my_first_app/my_first_app.h</code>:</p>
+<pre><code>rm src/examples/my_first_app/my_first_app.c</code></pre>
+<pre><code>#pragma once
+
+#include &lt;px4_platform_common/module.h&gt;
+
+extern "C" __EXPORT int my_first_app_main(int argc, char *argv[]);
+
+class MyFirstApp : public ModuleBase&lt;MyFirstApp&gt;
+{
+public:
+	MyFirstApp() = default;
+	~MyFirstApp() override = default;
+
+	/** @see ModuleBase */
+	static int task_spawn(int argc, char *argv[]);
+	static MyFirstApp *instantiate(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+
+	void run() override;
+	int print_status() override;
+};</code></pre>
+<p>注意:类继承 <code>ModuleBase&lt;MyFirstApp&gt;</code>——尖括号里是自己,这是 C++ 的 CRTP 技巧,ModuleBase 靠它找到你的静态方法。</p>
+</li>
+<li>
+<p>新建 <code>src/examples/my_first_app/my_first_app.cpp</code>:</p>
+<pre><code>#include "my_first_app.h"
+
+#include &lt;px4_platform_common/log.h&gt;
+#include &lt;px4_platform_common/posix.h&gt;
+
+#include &lt;poll.h&gt;
+#include &lt;errno.h&gt;
+
+#include &lt;uORB/uORB.h&gt;
+#include &lt;uORB/topics/sensor_combined.h&gt;
+
+int MyFirstApp::print_status()
+{
+	PX4_INFO("Running");
+	return 0;
+}
+
+int MyFirstApp::custom_command(int argc, char *argv[])
+{
+	return print_usage("unknown command");
+}
+
+int MyFirstApp::task_spawn(int argc, char *argv[])
+{
+	_task_id = px4_task_spawn_cmd("my_first_app",
+				      SCHED_DEFAULT,
+				      SCHED_PRIORITY_DEFAULT,
+				      2000,
+				      (px4_main_t)&amp;run_trampoline,
+				      (char *const *)argv);
+
+	if (_task_id &lt; 0) {
+		_task_id = -1;
+		return -errno;
+	}
+
+	return 0;
+}
+
+MyFirstApp *MyFirstApp::instantiate(int argc, char *argv[])
+{
+	MyFirstApp *instance = new MyFirstApp();
+
+	if (instance == nullptr) {
+		PX4_ERR("alloc failed");
+	}
+
+	return instance;
+}
+
+void MyFirstApp::run()
+{
+	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	orb_set_interval(sensor_sub_fd, 1000);  <span class="comment" style="color:#777">// 限制到 1 Hz</span>
+
+	px4_pollfd_struct_t fds[1];
+	fds[0].fd = sensor_sub_fd;
+	fds[0].events = POLLIN;
+
+	while (!should_exit()) {          <span class="comment" style="color:#777">// stop 命令会把它变为 true</span>
+		px4_poll(fds, 1, 1000);
+
+		if (fds[0].revents &amp; POLLIN) {
+			struct sensor_combined_s raw;
+			orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &amp;raw);
+			PX4_INFO("Accel:\t%8.4f\t%8.4f\t%8.4f",
+				 (double)raw.accelerometer_m_s2[0],
+				 (double)raw.accelerometer_m_s2[1],
+				 (double)raw.accelerometer_m_s2[2]);
+		}
+	}
+
+	orb_unsubscribe(sensor_sub_fd);
+}
+
+int MyFirstApp::print_usage(const char *reason)
+{
+	if (reason) {
+		PX4_WARN("%s\n", reason);
+	}
+
+	PRINT_MODULE_DESCRIPTION(
+		R"DESCR_STR(
+### Description
+Lesson example: subscribe sensor_combined, print accel at 1 Hz.
+
+### Examples
+CLI usage example:
+$ my_first_app start
+
+)DESCR_STR");
+
+	PRINT_MODULE_USAGE_NAME("my_first_app", "example");
+	PRINT_MODULE_USAGE_COMMAND("start");
+	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
+
+	return 0;
+}
+
+int my_first_app_main(int argc, char *argv[])
+{
+	return MyFirstApp::main(argc, argv);   <span class="comment" style="color:#777">// start/stop/status 都在这里面</span>
+}</code></pre>
+</li>
+<li>
+<p>更新 <code>src/examples/my_first_app/CMakeLists.txt</code>,把源文件换成 <code>.cpp</code>:</p>
+<pre><code>px4_add_module(
+	MODULE examples__my_first_app
+	MAIN my_first_app
+	STACK_MAIN 2000
+	SRCS
+		my_first_app.cpp
+	DEPENDS
+	)</code></pre>
+</li>
+<li>
+<p>编译:</p>
+<pre class="terminal"><code>make px4_sitl_default</code></pre>
+</li>
+<li>
+<p>运行——重点体验三件套(接 Gazebo 数据更直观,<code>HEADLESS=1 make px4_sitl gz_x500</code>):</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app          <span class="comment"># 打印用法</span>
+<span class="prompt">pxh&gt;</span> my_first_app start    <span class="comment"># 后台运行,每秒打印一行 Accel</span>
+<span class="prompt">pxh&gt;</span> my_first_app status   <span class="comment"># Running</span>
+<span class="prompt">pxh&gt;</span> my_first_app stop     <span class="comment"># 打印停止</span></code></pre>
+</li>
+<li>
+<p>(对照阅读,5 分钟)打开官方模板 <code>src/templates/template_module/template_module.{h,cpp}</code>,找找你刚写的五个"槽"在哪。模板比你多出来的部分:<code>px4_getopt</code> 命令行参数解析、<code>ModuleParams</code> 参数接入——后者就是第 6 课的内容。</p>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你的模块现在有了 PX4 模块的"标准身法":可启动、可停止、可查询,主循环能被优雅打断。至此,你已经掌握了在 PX4 里"像原住民一样"写代码的全部基本套路——<a href="../reference/module-anatomy.html">模块骨架速查表</a> 已备好,以后写新模块从它出发。
+</div>
+
+<h2>三、课后探索(可选)</h2>
+<p>第三种"活法"——work queue:读 <code>src/examples/work_item/</code>,它继承 <code>ScheduledWorkItem</code>,不独占线程,而是注册到共享工作队列按周期唤醒(<code>ScheduleOnInterval</code>)。这是 PX4 轻量模块的主流做法(load_mon、battery_status 都是)。看懂它和本课 task 版的差异,你就集齐了三种活法。</p>
+
+<h2>四、自测(含复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"shell 里执行 my_first_app start 之后,模块在哪里运行?",
+ "options":["独立后台线程","shell 前台阻塞","只在编译时存在"],
+ "answer":0,
+ "explain":"task_spawn 用 px4_task_spawn_cmd 创建独立任务,命令立即返回。"},
+{"q":"想让模块开机后自动运行、无需手动 start,应该修改哪里?",
+ "options":["rcS 启动脚本","Kconfig 开关文件","msg 消息定义"],
+ "answer":0,
+ "explain":"启动脚本决定运行时行为;Kconfig 只决定编译与否。第 7 课详解。"},
+{"q":"模板中 task_spawn 里的 px4_task_spawn_cmd 创建的是什么?",
+ "options":["独立线程任务","共享工作队列","硬件定时中断"],
+ "answer":0,
+ "explain":"它为模块创建自己的线程;work queue 方式则由 ScheduledWorkItem 挂共享队列。"},
+{"q":"(复习·第3课)想只跑物理仿真、不弹 Gazebo 窗口,设置?",
+ "options":["HEADLESS=1","PX4_GZ_WORLD","GZ_VERBOSE=1"],
+ "answer":0,
+ "explain":"px4-rc.gzsim 检测 HEADLESS 环境变量,设置后只启动 gz sim -s。"},
+{"q":"(复习·第2课)CONFIG_EXAMPLES_MY_FIRST_APP 与目录的关系?",
+ "options":["符号名映射到路径","名称随意互不相干","仅用于生成文档"],
+ "answer":0,
+ "explain":"构建系统按符号名小写映射到 src/examples/ 下的同名目录。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/modules/module_template.html">官方 Application/Module Template(v1.17)</a> 及仓库源码 <code>src/templates/template_module/</code>。本课代码是它的删减版:去掉了命令行参数解析和参数系统(第 6 课补回),保留模块骨架。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>编译报错、C++ 语法看不懂、或者好奇 <code>run_trampoline</code> / CRTP 是什么——随时问。下一课进入阶段二:<strong>自定义 uORB topic</strong>——定义自己的消息类型,让你的模块发布数据、别的模块(或 QGC)订阅,这是"改 PX4"最常见的真实需求。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0003-gazebo-sitl-data-debugging.html">第 3 课 · Gazebo SITL 与数据调试</a></span>
+<span>参考:<a href="../reference/module-anatomy.html">模块骨架速查</a> · <a href="../reference/roadmap.html">课程地图</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

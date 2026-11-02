@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · PX4 模块骨架速查</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · PX4 模块骨架速查</h1>
+<div class="lesson-meta">打印友好 · 写新模块时从这里抄骨架 · 随课程更新</div>
+
+<p>三个文件起步,一个符号启用。抄完骨架再填业务逻辑。</p>
+
+<h2>一、目录与三件套</h2>
+
+<pre class="terminal"><code>src/examples/&lt;my_module&gt;/          <span class="comment"># 名字全小写;CONFIG_EXAMPLES_&lt;MY_MODULE&gt; 要能映射到它</span>
+├── &lt;my_module&gt;.h                 <span class="comment"># 类声明(继承 ModuleBase)</span>
+├── &lt;my_module&gt;.cpp               <span class="comment"># 实现 + &lt;my_module&gt;_main</span>
+├── CMakeLists.txt               <span class="comment"># px4_add_module</span>
+└── Kconfig                      <span class="comment"># menuconfig EXAMPLES_&lt;MY_MODULE&gt;</span></code></pre>
+
+<p>板级启用(在 <code>boards/px4/sitl/default.px4board</code> 或目标板子的 px4board):</p>
+<pre><code>CONFIG_EXAMPLES_&lt;MY_MODULE&gt;=y</code></pre>
+
+<h2>二、CMakeLists.txt 最小模板</h2>
+
+<pre><code>px4_add_module(
+	MODULE examples__&lt;my_module&gt;   <span class="comment"># 父目录前缀__模块名</span>
+	MAIN &lt;my_module&gt;               <span class="comment"># shell 命令名 = 入口函数前缀</span>
+	STACK_MAIN 2000                <span class="comment"># 主线程栈大小(字节)</span>
+	SRCS
+		&lt;my_module&gt;.cpp
+	DEPENDS
+	)</code></pre>
+
+<h2>三、Kconfig 最小模板</h2>
+
+<pre><code>menuconfig EXAMPLES_&lt;MY_MODULE&gt;
+	bool "&lt;my_module&gt;"
+	default n
+	---help---
+		Enable support for &lt;my_module&gt;</code></pre>
+
+<h2>四、C++ 骨架(task 版)</h2>
+
+<p>头文件:</p>
+<pre><code>#pragma once
+
+#include &lt;px4_platform_common/module.h&gt;
+
+extern "C" __EXPORT int &lt;my_module&gt;_main(int argc, char *argv[]);
+
+class &lt;MyModule&gt; : public ModuleBase&lt;&lt;MyModule&gt;&gt;
+{
+public:
+	&lt;MyModule&gt;() = default;
+	~&lt;MyModule&gt;() override = default;
+
+	static int task_spawn(int argc, char *argv[]);
+	static &lt;MyModule&gt; *instantiate(int argc, char *argv[]);
+	static int custom_command(int argc, char *argv[]);
+	static int print_usage(const char *reason = nullptr);
+
+	void run() override;
+	int print_status() override;
+};</code></pre>
+
+<p>实现文件要点(完整可运行示例见第 4 课 <a href="../lessons/0004-task-module-scheduling.html">my_first_app</a> 与官方模板 <code>src/templates/template_module/</code>):</p>
+
+<pre><code>int &lt;MyModule&gt;::task_spawn(int argc, char *argv[])
+{
+	_task_id = px4_task_spawn_cmd("&lt;my_module&gt;",
+				      SCHED_DEFAULT,          <span class="comment">// 调度策略</span>
+				      SCHED_PRIORITY_DEFAULT, <span class="comment">// 优先级</span>
+				      2000,                   <span class="comment">// 栈大小</span>
+				      (px4_main_t)&amp;run_trampoline,
+				      (char *const *)argv);
+	if (_task_id &lt; 0) { _task_id = -1; return -errno; }
+	return 0;
+}
+
+void &lt;MyModule&gt;::run()
+{
+	// 订阅
+	int sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	px4_pollfd_struct_t fds[1] = { { .fd = sub_fd, .events = POLLIN } };
+
+	while (!should_exit()) {              <span class="comment">// ← stop 命令的开关</span>
+		px4_poll(fds, 1, 1000);
+		if (fds[0].revents &amp; POLLIN) {
+			struct sensor_combined_s raw;
+			orb_copy(ORB_ID(sensor_combined), sub_fd, &amp;raw);
+			// …业务逻辑…
+		}
+	}
+	orb_unsubscribe(sub_fd);
+}
+
+int &lt;my_module&gt;_main(int argc, char *argv[])
+{
+	return &lt;MyModule&gt;::main(argc, argv);   <span class="comment">// start/stop/status 由 ModuleBase 提供</span>
+}</code></pre>
+
+<h2>五、Work queue 版差异(轻量模块)</h2>
+
+<p>不独占线程,继承 <code>px4_platform_common/px4_work_queue/ScheduledWorkItem</code>,注册后按周期被共享队列唤醒。参考 <code>src/examples/work_item/</code>:</p>
+
+<pre><code>class &lt;MyModule&gt; : public ModuleBase&lt;&lt;MyModule&gt;&gt;, public ScheduledWorkItem
+{
+	…
+	void Run() override;  <span class="comment">// 注意大写 R,每次被唤醒执行一次</span>
+};
+
+// 启动时:
+ScheduleOnInterval(1000000_us);  <span class="comment">// 每 1 秒唤醒一次</span>
+// 停止时:
+ScheduleClear();</code></pre>
+
+<h2>六、shell 命令一览</h2>
+
+<table class="map">
+<tr><th>命令</th><th>效果</th><th>落到哪个函数</th></tr>
+<tr><td><code>&lt;module&gt;</code>(无参数)</td><td>打印用法</td><td><code>print_usage()</code></td></tr>
+<tr><td><code>&lt;module&gt; start</code></td><td>后台启动</td><td><code>task_spawn()</code> → <code>instantiate()</code> → <code>run()</code></td></tr>
+<tr><td><code>&lt;module&gt; stop</code></td><td>优雅停止</td><td><code>should_exit()</code> 变 true</td></tr>
+<tr><td><code>&lt;module&gt; status</code></td><td>运行状态</td><td><code>print_status()</code></td></tr>
+<tr><td><code>uorb top</code></td><td>确认模块在发布/订阅</td><td>—</td></tr>
+</table>
+
+<h2>七、常见坑</h2>
+<ul>
+<li><strong>Couldn't find path</strong>:CONFIG 符号名与目录名不一致(全小写对照)。</li>
+<li><strong>start 后没反应</strong>:先看 <code>&lt;module&gt; status</code>,再用 <code>uorb top</code> 确认订阅的 topic 有数据;run() 里 poll 超时太短会空转,太长 stop 响应慢。</li>
+<li><strong>stop 后还在打印</strong>:run() 循环里用了阻塞 IO 且没有检查 should_exit()。</li>
+<li><strong>栈溢出</strong>:局部大数组/深递归 → 调大 <code>STACK_MAIN</code>,或 SITL 下看 <code>dmesg</code>。</li>
+</ul>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0004-task-module-scheduling.html">第 4 课</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="roadmap.html">课程地图</a></span>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,192 @@
+/* ============================================================
+   PX4 课程共享样式 — Tufte 风格,打印友好
+   所有 lessons/*.html 与 reference/*.html 共用
+   ============================================================ */
+
+:root {
+	--ink: #1c2024;
+	--paper: #fdfcf8;
+	--accent: #0b5fa5;        /* PX4 蓝 */
+	--accent-soft: #e8f1f9;
+	--warn: #a5450b;
+	--ok: #2c7a3f;
+	--bad: #b03030;
+	--rule: #d8d4c8;
+	--muted: #6b6f76;
+	--code-bg: #f4f2ea;
+}
+
+* { box-sizing: border-box; }
+
+html { font-size: 17px; }
+
+body {
+	margin: 0 auto;
+	max-width: 44rem;
+	padding: 2.5rem 1.5rem 6rem;
+	background: var(--paper);
+	color: var(--ink);
+	font-family: "Source Serif Pro", "Noto Serif SC", "Songti SC", Georgia, serif;
+	line-height: 1.65;
+	font-variant-numeric: oldstyle-nums;
+}
+
+/* ---------- 标题 ---------- */
+h1, h2, h3 {
+	font-family: "Source Sans Pro", "Noto Sans SC", "PingFang SC", system-ui, sans-serif;
+	line-height: 1.25;
+	font-weight: 700;
+}
+h1 { font-size: 1.7rem; margin: 0 0 .25rem; letter-spacing: .01em; }
+h2 {
+	font-size: 1.2rem; margin: 2.6rem 0 .8rem;
+	padding-top: .6rem; border-top: 1px solid var(--rule);
+}
+h3 { font-size: 1.02rem; margin: 1.6rem 0 .4rem; }
+
+.lesson-meta {
+	font-family: "Source Sans Pro", "Noto Sans SC", sans-serif;
+	font-size: .8rem; color: var(--muted); margin-bottom: 2rem;
+}
+.lesson-meta .mission {
+	display: inline-block; background: var(--accent-soft); color: var(--accent);
+	border-radius: 3px; padding: .1em .5em; margin-right: .5em;
+}
+
+/* ---------- 正文元素 ---------- */
+p { margin: .8rem 0; }
+a { color: var(--accent); text-decoration: none; border-bottom: 1px solid #b9d2e8; }
+a:hover { border-bottom-color: var(--accent); }
+strong { font-weight: 700; }
+ul, ol { padding-left: 1.4rem; }
+li { margin: .35rem 0; }
+hr { border: none; border-top: 1px solid var(--rule); margin: 2.5rem 0; }
+
+blockquote {
+	margin: 1rem 0; padding: .4rem 1rem;
+	border-left: 3px solid var(--accent);
+	background: var(--accent-soft);
+	font-size: .95rem;
+}
+blockquote p { margin: .3rem 0; }
+
+/* ---------- 代码 ---------- */
+code, pre {
+	font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+	font-size: .84em;
+}
+code {
+	background: var(--code-bg); padding: .12em .35em; border-radius: 3px;
+}
+pre {
+	background: var(--code-bg); border: 1px solid var(--rule); border-radius: 5px;
+	padding: .8rem 1rem; overflow-x: auto; line-height: 1.5;
+}
+pre code { background: none; padding: 0; font-size: .88em; }
+
+/* 终端样式 */
+pre.terminal {
+	background: #23272e; color: #e6e1d3; border-color: #23272e;
+}
+pre.terminal code { color: inherit; }
+pre.terminal .prompt { color: #7ec87e; }   /* pxh> 提示符 */
+pre.terminal .comment { color: #8a919c; }
+
+/* ---------- 卡片/区块 ---------- */
+.card {
+	border: 1px solid var(--rule); border-radius: 6px;
+	padding: .9rem 1.2rem; margin: 1.2rem 0;
+	background: #fff;
+}
+.card h3 { margin-top: 0; }
+.card.win  { border-left: 4px solid var(--ok); }
+.card.warn { border-left: 4px solid var(--warn); }
+.card.info { border-left: 4px solid var(--accent); }
+
+/* 实操步骤 */
+ol.steps { counter-reset: step; list-style: none; padding-left: 0; }
+ol.steps > li {
+	counter-increment: step; position: relative;
+	padding-left: 2.4rem; margin: 1.1rem 0;
+}
+ol.steps > li::before {
+	content: counter(step);
+	position: absolute; left: 0; top: .1rem;
+	width: 1.6rem; height: 1.6rem; border-radius: 50%;
+	background: var(--accent); color: #fff;
+	font-family: "Source Sans Pro", sans-serif; font-size: .85rem; font-weight: 700;
+	display: flex; align-items: center; justify-content: center;
+}
+
+/* 目录地图表 */
+table.map {
+	width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .92rem;
+}
+table.map th, table.map td {
+	text-align: left; padding: .4rem .6rem; border-bottom: 1px solid var(--rule);
+	vertical-align: top;
+}
+table.map th {
+	font-family: "Source Sans Pro", sans-serif; font-size: .78rem;
+	text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+}
+table.map td:first-child { font-family: monospace; font-size: .85em; white-space: nowrap; }
+
+/* ---------- 测验(由 quiz.js 渲染) ---------- */
+.quiz { margin: 1.5rem 0; }
+.quiz-question {
+	border: 1px solid var(--rule); border-radius: 6px;
+	padding: .9rem 1.1rem; margin: .9rem 0; background: #fff;
+}
+.quiz-question .q-text { font-weight: 600; margin-bottom: .6rem; }
+.quiz-question .q-text .q-num { color: var(--accent); margin-right: .4em; }
+.quiz-options { list-style: none; padding: 0; margin: 0; }
+.quiz-options li { margin: .3rem 0; }
+.quiz-options button {
+	display: block; width: 100%; text-align: left;
+	font: inherit; font-size: .93rem;
+	padding: .45rem .8rem; cursor: pointer;
+	border: 1px solid var(--rule); border-radius: 4px; background: var(--paper);
+	transition: background .12s;
+}
+.quiz-options button:hover:not(:disabled) { background: var(--accent-soft); }
+.quiz-options button:disabled { cursor: default; }
+.quiz-options button.correct {
+	background: #e5f3e8; border-color: var(--ok); color: var(--ok); font-weight: 600;
+}
+.quiz-options button.wrong {
+	background: #f9e9e9; border-color: var(--bad); color: var(--bad);
+}
+.quiz-options li .key {
+	display: inline-block; width: 1.3em; font-weight: 700; color: var(--muted);
+}
+.quiz-feedback { font-size: .88rem; margin-top: .55rem; display: none; }
+.quiz-feedback.show { display: block; }
+.quiz-feedback.ok  { color: var(--ok); }
+.quiz-feedback.err { color: var(--bad); }
+.quiz-score {
+	font-family: "Source Sans Pro", sans-serif; font-weight: 700;
+	color: var(--accent); margin: 1rem 0; display: none;
+}
+.quiz-score.show { display: block; }
+
+/* ---------- 页脚导航 ---------- */
+footer.lesson-nav {
+	margin-top: 3.5rem; padding-top: 1rem; border-top: 2px solid var(--rule);
+	font-family: "Source Sans Pro", "Noto Sans SC", sans-serif; font-size: .88rem;
+	display: flex; justify-content: space-between; flex-wrap: wrap; gap: .5rem;
+}
+
+.tip-teacher {
+	margin-top: 2.5rem; padding: .8rem 1.1rem; border-radius: 6px;
+	background: #fff8e6; border: 1px solid #eadfae; font-size: .9rem;
+}
+.tip-teacher strong { color: var(--warn); }
+
+/* ---------- 打印 ---------- */
+@media print {
+	body { max-width: none; font-size: 11pt; padding: 0; }
+	.tip-teacher, .quiz-options button { display: none; }
+	.quiz-feedback { display: block; }
+	a { border-bottom: none; color: inherit; }
+}

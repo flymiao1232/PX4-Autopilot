@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · PX4 课程地图(v1.17 官方文档主线)</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · PX4 课程地图</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+主线:PX4 官方文档 v1.17 · 每课标注对应官方章节
+</div>
+
+<p>本课程按 <a href="https://docs.px4.io/v1.17/">PX4 官方文档 v1.17</a> 的 "Getting Started → Concepts → Simulation → Middleware → Debugging" 脉络组织。
+每次上课先看这里:知道自己在官方体系的哪一站,也方便直接跳读官方原文。</p>
+
+<h2>阶段一 · 跑起来(入门主线)</h2>
+
+<table class="map">
+<tr><th>课</th><th>技能目标</th><th>对应官方文档(v1.17)</th><th>状态</th></tr>
+<tr>
+<td><a href="../lessons/0001-px4-skeleton-uorb-shell.html">第 1 课 · PX4 的骨架</a></td>
+<td>建立模块+uORB 心智模型;在 shell 里运行 px4_simple_app</td>
+<td><a href="https://docs.px4.io/v1.17/en/concept/architecture.html">PX4 Flight Stack Architecture</a></td>
+<td>✅ 已发布</td>
+</tr>
+<tr>
+<td><a href="../lessons/0002-your-first-app.html">第 2 课 · 手写你的第一个应用</a></td>
+<td>从零创建模块目录 + CMake + Kconfig,编译、运行、订阅传感器数据</td>
+<td><a href="https://docs.px4.io/v1.17/en/modules/hello_sky.html">Writing your First Application</a></td>
+<td>✅ 已发布</td>
+</tr>
+<tr>
+<td><a href="../lessons/0003-gazebo-sitl-data-debugging.html">第 3 课 · Gazebo SITL 与数据调试</a></td>
+<td>接 Gazebo 仿真;用 uorb top / listener / MAVLink shell 观察活数据</td>
+<td><a href="https://docs.px4.io/v1.17/en/sim_gazebo_gz/">Gazebo Simulation</a> · <a href="https://docs.px4.io/v1.17/en/debug/sensor_uorb_topic_debugging.html">Topic Debugging</a></td>
+<td>✅ 已发布</td>
+</tr>
+<tr>
+<td><a href="../lessons/0004-task-module-scheduling.html">第 4 课 · 正式模块与调度</a></td>
+<td>用 ModuleBase 写 start/stop/status 模块;理解 task 与 work queue</td>
+<td><a href="https://docs.px4.io/v1.17/en/modules/module_template.html">Application/Module Template</a></td>
+<td>✅ 已发布</td>
+</tr>
+</table>
+
+<h2>阶段二 · 改得动(核心机制)</h2>
+
+<table class="map">
+<tr><th>课</th><th>技能目标</th><th>对应官方文档(v1.17)</th><th>状态</th></tr>
+<tr>
+<td><a href="../lessons/0005-custom-uorb-topic.html">第 5 课 · 自定义 uORB topic</a></td>
+<td>新增 .msg、跨模块传自定义数据</td>
+<td><a href="https://docs.px4.io/v1.17/en/middleware/uorb.html">uORB Messaging</a></td>
+<td>✅ 已发布</td>
+</tr>
+<tr>
+<td>第 6 课 · 参数系统</td>
+<td>给模块加 param,运行时可调可存</td>
+<td><a href="https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html">Parameters &amp; Configs</a></td>
+<td>预告</td>
+</tr>
+<tr>
+<td>第 7 课 · 启动流程</td>
+<td>rcS 启动脚本;让模块开机自启</td>
+<td><a href="https://docs.px4.io/v1.17/en/concept/system_startup.html">System Startup</a></td>
+<td>预告</td>
+</tr>
+</table>
+
+<h2>阶段三 · 改得好(进阶,按实际需要触发)</h2>
+
+<ul>
+<li>控制链路深读(mc_rate_control → control_allocator):结合 <a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">Control Allocation</a></li>
+<li>日志与事后分析:ULog、<a href="https://docs.px4.io/v1.17/en/dev_log/logging.html">Logging</a>、Flight Review</li>
+<li>Out-of-Tree 模块:不动主仓库发布自己的模块</li>
+<li>MAVLink 自定义消息(需要与地面站通信时)</li>
+</ul>
+
+<div class="card info">
+<strong>怎么用这张地图:</strong>每课结束时回到这里打勾。如果某课对应官方页面读不懂,直接问你的老师(对话里的 Claude),而不是自己硬啃。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0005-custom-uorb-topic.html">第 5 课</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="../MISSION.md">MISSION.md</a></span>
+</footer>
+
+</body>
+</html>

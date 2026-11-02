@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 1 课 · PX4 的骨架:模块、uORB 与 Shell</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 1 课 · PX4 的骨架:模块、uORB 与 Shell</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-10-31 · 约 15 分钟 · 配套参考:<a href="../reference/roadmap.html">课程地图</a> · <a href="../reference/glossary.html">术语表</a>
+</div>
+
+<p>改 PX4 代码之前,你需要一个正确的心智模型。好消息是:这个模型只需要一句话——</p>
+
+<blockquote>
+<p><strong>PX4 是一组互相独立的小程序(模块),它们不互相调用函数,而是通过一个叫 <em>uORB</em> 的消息总线发布/订阅数据。</strong></p>
+</blockquote>
+
+<p>记住这句话,你看任何 PX4 代码都会问三个问题:<em>这个模块订阅什么?发布什么?我能在 shell 里怎么运行它?</em>本课就建立这三个直觉。</p>
+
+<h2>一、数据是怎么流动的</h2>
+
+<p>以多旋翼的姿态控制为例,一条真实的数据流水线(箭头 = uORB topic):</p>
+
+<pre class="terminal"><code>sensors ──&gt; sensor_combined ──&gt; ekf2 ──&gt; vehicle_attitude ──&gt; mc_att_control ──&gt; actuator_motors
+ <span class="comment">(融合原始传感器)   (IMU 融合数据)      (状态估计)      (姿态四元数)        (姿态控制器)      (电机输出)</span></code></pre>
+
+<p>每个方框都是一个<strong>模块</strong>:独立的可执行程序,在 PX4 shell(<code>pxh&gt;</code>)里就是一个命令。模块之间唯一的耦合就是 topic——这就是为什么改 PX4 通常是"加一个新模块,订阅别人的 topic,发布一个新 topic",而不是去改别人的代码。官方的系统架构图解见 <a href="https://docs.px4.io/v1.17/en/concept/architecture.html">PX4 Flight Stack Architecture</a>(v1.17)。</p>
+
+<p>完整的数据流关系图见 <a href="https://docs.px4.io/v1.17/en/middleware/uorb_graph.html">uORB Graph</a>(本仓库:<code>docs/en/middleware/uorb_graph.md</code>)。</p>
+
+<h2>二、代码在哪:目录地图</h2>
+
+<p>这是本仓库(v1.17)的真实顶层结构,先把地图装进脑子:</p>
+
+<table class="map">
+<tr><th>目录</th><th>装的是什么</th><th>举例</th></tr>
+<tr><td>src/modules/</td><td>飞行与控制相关的主模块</td><td>ekf2、mc_att_control、commander</td></tr>
+<tr><td>src/drivers/</td><td>硬件驱动(IMU、磁力计、PWM…)</td><td>imu、magnetometer、pwm_out</td></tr>
+<tr><td>src/examples/</td><td>学习用示例(你的第一个模块放这里)</td><td>px4_simple_app、work_item</td></tr>
+<tr><td>src/templates/</td><td>正式模块模板(带 start/stop)</td><td>template_module</td></tr>
+<tr><td>src/lib/</td><td>共享库(数学、矩阵、geo…)</td><td>matrix、lib/mathlib</td></tr>
+<tr><td>src/systemcmds/</td><td>shell 命令工具</td><td>param、listener、uorb、top</td></tr>
+<tr><td>msg/</td><td>所有 uORB topic 的定义(.msg)</td><td>vehicle_attitude.msg</td></tr>
+<tr><td>boards/</td><td>板级配置(px4board)</td><td>px4/sitl/default.px4board</td></tr>
+<tr><td>ROMFS/</td><td>启动脚本与默认参数</td><td>px4fmu_common/init.d</td></tr>
+</table>
+
+<p>三个必背事实:</p>
+<ul>
+<li>一个模块 = 一个目录,里面至少一个源文件 + 一个 <code>CMakeLists.txt</code>。编译进 PX4 靠 <code>px4_add_module(...)</code> 这个 CMake 宏。</li>
+<li>模块的入口函数必须叫 <code>&lt;模块名&gt;_main</code>,并用 <code>__EXPORT</code> 导出——shell 才能把它当命令运行。</li>
+<li>topic 的类型定义在 <code>msg/*.msg</code>,编译时自动生成 C 结构体和 <code>ORB_ID(xxx)</code> 常量。想传自定义数据?加一个 .msg 文件就行。</li>
+</ul>
+
+<h2>三、uORB 三件套与三个调试命令</h2>
+
+<p>C API 核心就三个动作(以 <code>src/examples/px4_simple_app/px4_simple_app.c</code> 为实例):</p>
+
+<ul>
+<li><strong>发布</strong>:<code>orb_advertise(ORB_ID(vehicle_attitude), &amp;att)</code> 注册话题,<code>orb_publish(...)</code> 发数据。</li>
+<li><strong>订阅</strong>:<code>orb_subscribe(ORB_ID(vehicle_acceleration))</code> 拿到句柄,<code>orb_copy(...)</code> 取数据。</li>
+<li><strong>等待</strong>:用 <code>px4_poll()</code> 阻塞等数据,避免空转烧 CPU。</li>
+</ul>
+
+<p>在 shell 里观察 uORB 的三个必备命令:</p>
+
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> uorb top              <span class="comment"># 各 topic 的发布频率与 CPU 占用</span>
+<span class="prompt">pxh&gt;</span> uorb list              <span class="comment"># 当前存在的全部 topic</span>
+<span class="prompt">pxh&gt;</span> listener sensor_combined  <span class="comment"># 打印某个 topic 的最新数据</span></code></pre>
+
+<p>更多调试技巧见 <a href="https://docs.px4.io/v1.17/en/debug/sensor_uorb_topic_debugging.html">uORB 调试文档</a>(本仓库 <code>docs/en/debug/sensor_uorb_topic_debugging.md</code>)。</p>
+
+<h2>四、动手:15 分钟内跑通你的第一个 PX4 应用</h2>
+
+<p>你的机器上已经有 <code>build/px4_sitl_default</code> 构建产物,示例模块 <code>px4_simple_app</code> 也已在默认 SITL 配置中启用——直接开跑。</p>
+
+<ol class="steps">
+<li>
+<p>确认增量构建可用(第一次全编要较久,之后通常一分钟内):</p>
+<pre class="terminal"><code>cd ~/PX4-Autopilot
+make px4_sitl_default</code></pre>
+</li>
+<li>
+<p>单独启动 PX4 主程序,进入 <code>pxh&gt;</code> shell(不接仿真器,纯控制台):</p>
+<pre class="terminal"><code>./build/px4_sitl_default/bin/px4</code></pre>
+</li>
+<li>
+<p>看看"命令列表"其实就是模块列表:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> help</code></pre>
+</li>
+<li>
+<p>观察 uORB 总线上正在发生什么:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> uorb top</code></pre>
+<p>注意:此时没有仿真器连接,部分传感器数据可能是零值或静止——先熟悉界面即可,下一课接 Gazebo 看"活"的数据。</p>
+</li>
+<li>
+<p>运行你的第一个应用:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> px4_simple_app</code></pre>
+<p>预期输出 <code>Hello Sky!</code> 和几行姿态数据。</p>
+</li>
+<li>
+<p>这个应用是怎么写的?打开源码对照刚学的三件套:</p>
+<pre class="terminal"><code>code src/examples/px4_simple_app/px4_simple_app.c</code></pre>
+<p>找到 <code>orb_subscribe</code>、<code>orb_advertise</code>、<code>px4_poll</code> 三行,理解它订阅了加速度、发布了姿态。</p>
+</li>
+<li><p>输入 <code>exit</code> 退出。</p></li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你启动了 PX4,用 <code>uorb top</code> 看到了模块间的数据流,并在 shell 中运行了第一个应用。至此你已经拥有了"地图 + 导航工具"。
+</div>
+
+<h2>五、自测(先回忆,再点击)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"PX4 的模块之间,交换数据的标准机制是什么?",
+ "options":["全局静态共享变量","uORB 消息总线","直接相互函数调用"],
+ "answer":1,
+ "explain":"PX4 模块不直接调用彼此函数,而是通过 uORB 发布/订阅 topic 解耦。"},
+{"q":"想为系统新增一种自定义消息类型,应该在哪里定义?",
+ "options":["在 msg 目录中","在 src/lib 中","在 ROMFS 中"],
+ "answer":0,
+ "explain":"topic 类型定义在 msg/*.msg,构建时自动生成 C 结构体与 ORB_ID 常量。"},
+{"q":"在 PX4 shell 里,想查看某个 topic 的最新数据内容,应该用?",
+ "options":["listener 主题名","uorb top 命令","uorb list 命令"],
+ "answer":0,
+ "explain":"listener &lt;topic&gt; 打印最新一条数据;uorb top 看频率,uorb list 看列表。"},
+{"q":"一个模块要被编译进固件并能作为 shell 命令运行,其入口函数应命名为?",
+ "options":["普通的 main()","&lt;模块名&gt;_main","start() 入口"],
+ "answer":1,
+ "explain":"入口必须是 &lt;模块名&gt;_main 且用 __EXPORT 导出,shell 才能找到它。"}
+]'></div>
+
+<h2>六、本课来源</h2>
+<p>主要来源(建议通读,30 分钟):<a href="https://docs.px4.io/v1.17/en/modules/hello_sky.html">PX4 官方教程 v1.17《Writing your First Application (Hello Sky)》</a>,本仓库对应 <code>docs/en/modules/hello_sky.md</code>——本课的 <code>px4_simple_app</code> 就是它的成品,第 2 课将带你从零手写一遍。</p>
+<p>机制细节:<a href="https://docs.px4.io/v1.17/en/middleware/uorb.html">uORB 官方文档</a>(本仓库 <code>docs/en/middleware/uorb.md</code>)。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>有任何不清楚的地方——某个命令的输出看不懂、想换个角度解释、或者想跳过/深入某个主题——随时直接在对话里问我。下一课预告:<strong>手写你的第一个应用</strong>(从零创建模块目录 + CMake + Kconfig,编译运行,对照官方 Hello Sky 教程逐节完成)。完整路线见 <a href="../reference/roadmap.html">课程地图</a>。
+</div>
+
+<footer class="lesson-nav">
+<span>← 工作区:<a href="../MISSION.md">MISSION.md</a> · <a href="../RESOURCES.md">RESOURCES.md</a></span>
+<span>参考:<a href="../reference/roadmap.html">课程地图</a> · <a href="../reference/glossary.html">PX4 术语表</a> →</span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

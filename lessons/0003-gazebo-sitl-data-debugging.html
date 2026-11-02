@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 3 课 · Gazebo SITL 与数据调试</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 3 课 · Gazebo SITL 与数据调试</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-01 · 约 20 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0002-your-first-app.html">第 2 课</a>
+</div>
+
+<p>第 2 课末尾,你的 <code>my_first_app</code> 打印的加速度计全是 0——因为 SITL 的传感器数据要由仿真器注入。这一课接上 Gazebo,让整条数据流水线"活"起来,顺便掌握改代码时最重要的调试手段:<strong>实时观察 uORB 数据流</strong>。对应官方文档:<a href="https://docs.px4.io/v1.17/en/sim_gazebo_gz/">Gazebo Simulation</a> 与 <a href="https://docs.px4.io/v1.17/en/debug/sensor_uorb_topic_debugging.html">Sensor/uORB Topic Debugging</a>。</p>
+
+<h2>一、SITL 是怎么转起来的</h2>
+
+<p>你敲 <code>make px4_sitl gz_x500</code> 之后发生的事(全部可在本仓库源码中验证):</p>
+
+<pre class="terminal"><code>make px4_sitl gz_x500
+ │  ① 增量编译 px4_sitl_default(含你的 my_first_app)
+ │  ② 以环境变量 PX4_SIM_MODEL=gz_x500 启动 bin/px4
+ ▼
+px4 主程序 → 执行启动脚本 ROMFS/.../init.d-posix/rcS
+ │           └─ 来源:ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim
+ ▼
+px4-rc.gzsim 脚本:
+ ├─ 检查 gz 版本 ≥ 8(Harmonic)——你的机器是 8.14 ✅
+ ├─ 启动 gz sim -s  ← 物理仿真服务器(纯计算,无界面)
+ │    若未设 HEADLESS,再启动 gz sim -g ← Gazebo GUI
+ └─ gz_bridge 模块通过 gz-transport 连上仿真器
+ ▼
+数据流(活了!):
+ gz 物理引擎 → gz_bridge → sensor_combined → ekf2
+   → vehicle_attitude → mc_att_control → actuator_motors → gz(电机转动,飞机悬停)</code></pre>
+
+<p>三个关键认知:</p>
+<ul>
+<li><strong><code>gz_x500</code> 是一个"仿真机型"</strong>,由 <code>ROMFS/px4fmu_common/init.d-posix/airframes/4001_gz_x500</code> 脚本定义。同理还有 <code>gz_x500_depth</code>、<code>gz_standard_vtol</code> 等几十个,全部在 <code>ROMFS/.../init.d-posix/airframes/</code> 里。</li>
+<li><strong>PX4 和 Gazebo 是同一台机器上的两个进程</strong>,通过 gz-transport(共享内存/UDP)通信。<code>gz_bridge</code> 模块就是翻译官:把 gz 的 IMU/GPS 数据搬进 uORB,把 actuator_motors 搬回 gz。</li>
+<li>物理引擎(<code>gz sim -s</code>)和 GUI(<code>-g</code>)是分开的两个进程。<strong>设 <code>HEADLESS=1</code> 就只跑物理、不弹窗口</strong>——改代码调试时这通常是更好的选择。</li>
+</ul>
+
+<h2>二、动手:让数据活起来</h2>
+
+<ol class="steps">
+<li>
+<p>启动带 Gazebo 的 SITL(先试试带 GUI 的版本;你的 WSL2/Windows 11 通常能弹出 Gazebo 窗口):</p>
+<pre class="terminal"><code>cd ~/PX4-Autopilot
+make px4_sitl gz_x500</code></pre>
+<p>如果 Gazebo 窗口弹不出来、或图形很卡,改用无界面模式重来:</p>
+<pre class="terminal"><code>HEADLESS=1 make px4_sitl gz_x500</code></pre>
+</li>
+<li>
+<p>等控制台出现 <code>pxh&gt;</code>,注意启动日志里应有 <code>INFO [init] Gazebo simulator 8.14.0</code> 和 <code>Starting gazebo with world: ...</code> 两行。</p>
+</li>
+<li>
+<p>对比第 1 课:现在的 uORB 总线是活的。看频率:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> uorb top</code></pre>
+<p>你会看到 <code>sensor_combined</code>、<code>vehicle_attitude</code>、<code>vehicle_local_position</code> 等 topic 以几十到几百 Hz 持续发布——而第 1 课里它们几乎是静止的。</p>
+</li>
+<li>
+<p>运行第 2 课写的应用,这次读到真实数据:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app</code></pre>
+<p>预期:加速度计 ≈ <code>0.0  0.0  -9.8</code>(m/s²,飞机静置在"地面"上)——不再是全零!</p>
+</li>
+<li>
+<p>逐个节点看数据,走一遍第 1 课的数据流水线:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> listener sensor_combined        <span class="comment"># 原始 IMU(输入)</span>
+<span class="prompt">pxh&gt;</span> listener vehicle_attitude       <span class="comment"># EKF2 姿态估计(中间)</span>
+<span class="prompt">pxh&gt;</span> listener vehicle_local_position <span class="comment"># EKF2 位置估计</span>
+<span class="prompt">pxh&gt;</span> listener actuator_motors        <span class="comment"># 控制器输出(此刻应为 0,未解锁)</span></code></pre>
+<p><code>listener</code> 还可以带频率连续打印,例如 <code>listener sensor_combined 10</code>(10 Hz)。</p>
+</li>
+<li>
+<p>(进阶,可选)解锁起飞,看控制链末端动起来——这是仿真,摔了不花钱:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> commander arm
+<span class="prompt">pxh&gt;</span> commander takeoff
+<span class="prompt">pxh&gt;</span> listener actuator_motors 10    <span class="comment"># 看电机输出随姿态波动</span>
+<span class="prompt">pxh&gt;</span> commander disarm</code></pre>
+</li>
+<li>
+<p>再开第二个 shell 窗口调试(第一个终端被仿真占着):新开一个 WSL 终端,运行:</p>
+<pre class="terminal"><code>cd ~/PX4-Autopilot
+python3 Tools/mavlink_shell.py udpout:127.0.0.1:18570</code></pre>
+<p>原理:SITL 的 mavlink 模块在 UDP <strong>18570</strong> 端口(instance 0)监听 GCS 链路,MAVLink shell 经这条链路远程执行 nsh 命令。注意前缀必须是 <code>udpout:</code>(主动发送)而不是 <code>udp:</code>——裸 <code>udp:</code> 在 pymavlink 里是监听模式,会和 PX4 抢同一个端口。</p>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你第一次看到了<strong>活的</strong> PX4——从物理仿真到电机输出的完整数据流,并且能用 <code>uorb top</code> / <code>listener</code> / MAVLink shell 在任意节点"探头"看数据。今后改任何代码,这套动作就是你的眼睛。
+</div>
+
+<h2>三、改代码调试速查(本课的核心产出)</h2>
+
+<table class="map">
+<tr><th>我想…</th><th>命令</th></tr>
+<tr><td>看某 topic 最新一条数据</td><td><code>listener &lt;topic&gt;</code>;连续看:<code>listener &lt;topic&gt; 10</code></td></tr>
+<tr><td>看所有 topic 及发布频率</td><td><code>uorb top</code></td></tr>
+<tr><td>看某 topic 有哪些字段</td><td><code>uorb list</code> 查名字,字段定义查 <code>msg/&lt;name&gt;.msg</code> 或 <a href="https://docs.px4.io/v1.17/en/msg_docs/">官方 Message Reference</a></td></tr>
+<tr><td>另一个终端进 shell</td><td><code>python3 Tools/mavlink_shell.py udpout:127.0.0.1:18570</code></td></tr>
+<tr><td>不弹 GUI 快速迭代</td><td><code>HEADLESS=1 make px4_sitl gz_x500</code></td></tr>
+<tr><td>查某模块是否在跑</td><td><code>uorb top</code> 里找它发布的 topic;或 <code>&lt;模块名&gt; status</code>(多数模块支持)</td></tr>
+</table>
+
+<h2>四、自测(含前两课复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"SITL 中,负责把 Gazebo 的传感器数据搬进 uORB 总线的是?",
+ "options":["gz_bridge 模块","ekf2 状态估计","sensors 融合模块"],
+ "answer":0,
+ "explain":"gz_bridge 是 PX4 与 Gazebo 之间的翻译官,双向搬运数据。"},
+{"q":"想只跑物理仿真、不弹出 Gazebo 图形窗口,应该设置?",
+ "options":["HEADLESS=1","PX4_GZ_WORLD","GZ_VERBOSE=1"],
+ "answer":0,
+ "explain":"px4-rc.gzsim 脚本检测 HEADLESS 环境变量,设置后只启动 gz sim -s 服务器。"},
+{"q":"命令 make px4_sitl gz_x500 里的 gz_x500 决定的是?",
+ "options":["仿真机型配置","编译优化等级","串口通信波特率"],
+ "answer":0,
+ "explain":"gz_x500 对应 ROMFS init.d-posix/airframes/4001_gz_x500 机型脚本。"},
+{"q":"(复习·第2课)新增模块后,决定它被编译进目标文件的是?",
+ "options":["default.px4board","根 CMake 文件","msg 目录文件"],
+ "answer":0,
+ "explain":"板级 .px4board 的 CONFIG_ 符号驱动构建系统找到模块目录。"},
+{"q":"(复习·第1课)uORB 三件套中,让线程阻塞等待而不空转烧 CPU 的是?",
+ "options":["px4_poll 阻塞等待","orb_copy 拷贝数据","orb_publish 发布数据"],
+ "answer":0,
+ "explain":"px4_poll 阻塞到数据到达或超时;线程休眠不耗 CPU。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/sim_gazebo_gz/">官方 Gazebo Simulation 文档(v1.17)</a> 与 <a href="https://docs.px4.io/v1.17/en/debug/sensor_uorb_topic_debugging.html">Sensor/uORB Topic Debugging</a>。启动细节以本仓库源码为准:<code>ROMFS/px4fmu_common/init.d-posix/px4-rc.gzsim</code>(仿真启动脚本)、<code>src/modules/simulation/gz_bridge/</code>(数据翻译)、<code>ROMFS/px4fmu_common/init.d-posix/px4-rc.mavlink</code>(端口分配)。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>Gazebo 起不来、窗口黑屏、端口被占、或者对数据流水线的任何一环有疑问——把报错和输出发给我。下一课预告:<strong>正式模块与调度</strong>——把你的小工具升级为带 <code>start/stop</code> 命令、挂到 work queue 按周期运行的"正经"PX4 模块(对应官方 Application/Module Template)。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0002-your-first-app.html">第 2 课 · 手写第一个应用</a></span>
+<span>参考:<a href="../reference/roadmap.html">课程地图</a> · <a href="../reference/glossary.html">术语表</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

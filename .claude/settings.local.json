@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /home/amiao/PX4-Autopilot status --short .vscode/)",
+      "Bash(gcc --version)",
+      "Bash(wsl *)"
+    ]
+  }
+}

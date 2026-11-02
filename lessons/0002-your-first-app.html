@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 2 课 · 手写你的第一个 PX4 应用</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 2 课 · 手写你的第一个 PX4 应用</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-10-31 · 约 30 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0001-px4-skeleton-uorb-shell.html">第 1 课</a>
+</div>
+
+<p>上一课你运行了别人写好的 <code>px4_simple_app</code>。这一课你自己写一个——从零创建目录、三个文件、编译、运行,然后升级它去订阅真实传感器数据。这正是官方教程 <a href="https://docs.px4.io/v1.17/en/modules/hello_sky.html">Writing your First Application (Hello Sky)</a> 的内容,我们按官方步骤走,但写一个属于你自己的新模块 <code>my_first_app</code>(不动仓库自带的示例)。</p>
+
+<h2>一、模块三件套:每个 PX4 模块的最小构成</h2>
+
+<p>一个能被编译、能运行的 PX4 模块,目录里只需要三样东西:</p>
+
+<table class="map">
+<tr><th>文件</th><th>作用</th><th>关键内容</th></tr>
+<tr><td>xxx.c / xxx.cpp</td><td>源代码</td><td>入口函数 <code>&lt;名字&gt;_main</code>,<code>__EXPORT</code> 导出</td></tr>
+<tr><td>CMakeLists.txt</td><td>告诉构建系统怎么编译</td><td><code>px4_add_module(...)</code> 宏</td></tr>
+<tr><td>Kconfig</td><td>定义编译开关符号</td><td><code>menuconfig EXAMPLES_XXX</code> 布尔项</td></tr>
+</table>
+
+<p><code>px4_add_module</code> 的三个关键字段(以本课模块为例):</p>
+
+<pre><code>px4_add_module(
+	MODULE examples__my_first_app   <span class="comment" style="color:#777"># 固件内部唯一名,约定:父目录前缀__模块名</span>
+	MAIN my_first_app               <span class="comment" style="color:#777"># shell 里的命令名,也是入口函数前缀</span>
+	SRCS my_first_app.c             <span class="comment" style="color:#777"># 源文件列表</span>
+)</code></pre>
+
+<p>第三个环节是"开关"如何接通,这是新手最容易卡住的地方:</p>
+
+<pre class="terminal"><code>boards/px4/sitl/default.px4board 中的
+    CONFIG_EXAMPLES_MY_FIRST_APP=y
+        │  (构建系统 cmake/kconfig.cmake 按符号名自动找目录)
+        ▼
+src/examples/my_first_app/   ← 你的三件套就放在这</code></pre>
+
+<p>规则:<code>CONFIG_EXAMPLES_XXX</code> 对应 <code>src/examples/xxx</code>(小写)。所以<strong>符号名和目录名必须对得上</strong>,改错一个字母,构建就会报 "Couldn't find path"。</p>
+
+<h2>二、动手 part 1:最小应用</h2>
+
+<ol class="steps">
+<li>
+<p>创建模块目录:</p>
+<pre class="terminal"><code>cd ~/PX4-Autopilot
+mkdir -p src/examples/my_first_app</code></pre>
+</li>
+<li>
+<p>创建 <code>src/examples/my_first_app/my_first_app.c</code>,内容如下(许可证头从 <a href="https://docs.px4.io/v1.17/en/modules/hello_sky.html">官方教程</a> 或任意现有源文件顶部复制——PX4 要求每个文件都有):</p>
+<pre><code>#include &lt;px4_platform_common/log.h&gt;
+
+__EXPORT int my_first_app_main(int argc, char *argv[]);
+
+int my_first_app_main(int argc, char *argv[])
+{
+	PX4_INFO("Hello Sky!");
+	return OK;
+}</code></pre>
+</li>
+<li>
+<p>创建 <code>src/examples/my_first_app/CMakeLists.txt</code>:</p>
+<pre><code>px4_add_module(
+	MODULE examples__my_first_app
+	MAIN my_first_app
+	STACK_MAIN 2000
+	SRCS
+		my_first_app.c
+	DEPENDS
+	)</code></pre>
+</li>
+<li>
+<p>创建 <code>src/examples/my_first_app/Kconfig</code>:</p>
+<pre><code>menuconfig EXAMPLES_MY_FIRST_APP
+	bool "my_first_app"
+	default n
+	---help---
+		Enable support for my_first_app</code></pre>
+</li>
+<li>
+<p>打开 <code>boards/px4/sitl/default.px4board</code>,在 <code>CONFIG_EXAMPLES_HELLO=y</code> 附近加一行:</p>
+<pre><code>CONFIG_EXAMPLES_MY_FIRST_APP=y</code></pre>
+</li>
+<li>
+<p>编译:</p>
+<pre class="terminal"><code>make px4_sitl_default</code></pre>
+<p>这是增量构建,通常 1–2 分钟。如果报 <code>Couldn't find path for ...</code>,检查第 4、5 步的符号名和目录名是否完全一致(全小写)。</p>
+</li>
+<li>
+<p>运行:</p>
+<pre class="terminal"><code>./build/px4_sitl_default/bin/px4
+<span class="prompt">pxh&gt;</span> my_first_app</code></pre>
+<p>预期输出 <code>Hello Sky!</code> ——这是<strong>你自己的代码</strong>在 PX4 里跑起来了。</p>
+</li>
+</ol>
+
+<h2>三、动手 part 2:订阅真实传感器数据</h2>
+
+<p>只打印一行太无聊。现在把 <code>my_first_app.c</code> 的 main 函数体换成下面这样(订阅 <code>sensor_combined</code>,轮询 5 次,打印加速度计):</p>
+
+<pre><code>#include &lt;px4_platform_common/px4_config.h&gt;
+#include &lt;px4_platform_common/log.h&gt;
+#include &lt;px4_platform_common/posix.h&gt;
+#include &lt;poll.h&gt;
+
+#include &lt;uORB/uORB.h&gt;
+#include &lt;uORB/topics/sensor_combined.h&gt;
+
+__EXPORT int my_first_app_main(int argc, char *argv[]);
+
+int my_first_app_main(int argc, char *argv[])
+{
+	PX4_INFO("Hello Sky!");
+
+	/* subscribe to sensor_combined topic, limit to 5 Hz */
+	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
+	orb_set_interval(sensor_sub_fd, 200);
+
+	px4_pollfd_struct_t fds[] = {
+		{ .fd = sensor_sub_fd,   .events = POLLIN },
+	};
+
+	int error_counter = 0;
+
+	for (int i = 0; i &lt; 5; i++) {
+		int poll_ret = px4_poll(fds, 1, 1000);
+
+		if (poll_ret == 0) {
+			PX4_ERR("Got no data within a second");
+
+		} else if (poll_ret &lt; 0) {
+			if (error_counter &lt; 10 || error_counter % 50 == 0) {
+				PX4_ERR("ERROR return value from poll(): %d", poll_ret);
+			}
+			error_counter++;
+
+		} else {
+			if (fds[0].revents &amp; POLLIN) {
+				/* copy data into local buffer */
+				struct sensor_combined_s raw;
+				orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &amp;raw);
+				PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
+					 (double)raw.accelerometer_m_s2[0],
+					 (double)raw.accelerometer_m_s2[1],
+					 (double)raw.accelerometer_m_s2[2]);
+			}
+		}
+	}
+
+	return OK;
+}</code></pre>
+
+<p>三行核心 API 对应第 1 课的三件套:<code>orb_subscribe</code>(订阅)、<code>px4_poll</code>(阻塞等待,不空转烧 CPU)、<code>orb_copy</code>(取数据)。</p>
+
+<div class="card warn">
+<strong>⚠️ 预期现象:</strong>不接仿真器时,加速度读数很可能是全 0 或超时——因为 SITL 的传感器数据由仿真器注入。让数据"活"起来(接 Gazebo)是第 3 课的内容,本课先确保链路通。
+</div>
+
+<ol class="steps">
+<li value="8">
+<p>重新编译并运行:</p>
+<pre class="terminal"><code>make px4_sitl_default
+./build/px4_sitl_default/bin/px4
+<span class="prompt">pxh&gt;</span> my_first_app</code></pre>
+<p>预期:打印 5 行 <code>Accelerometer: 0.0000 ...</code>(数据为零属正常,见上方提示)。</p>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你在 PX4 源码树里从零创建了一个模块,接通 Kconfig → px4board 的编译开关,并在 shell 里运行了自己写的代码。从这一刻起,"改 PX4 代码"对你不再是理论。
+</div>
+
+<h2>四、自测(含第 1 课复习——间隔重复帮你记住)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"px4_add_module 里的 MAIN 字段决定的是什么?",
+ "options":["模块命令名","源文件列表","线程栈大小"],
+ "answer":0,
+ "explain":"MAIN 是 shell 中的命令名,入口函数必须叫 &lt;MAIN&gt;_main。"},
+{"q":"新增模块后,哪个文件决定它被编译进目标?",
+ "options":["default.px4board","根 CMake 文件","msg 目录文件"],
+ "answer":0,
+ "explain":"板级 .px4board 中的 CONFIG_ 符号驱动构建;Kconfig 只是定义了这个符号。"},
+{"q":"CONFIG_EXAMPLES_MY_FIRST_APP=y 与磁盘目录的关系是?",
+ "options":["符号名映射到路径","名称随意互不相干","仅用于生成文档"],
+ "answer":0,
+ "explain":"构建系统按符号名小写映射到 src/examples/ 下的同名目录,名字必须一致。"},
+{"q":"(复习·第1课)在 PX4 shell 里查看某 topic 最新数据内容的命令是?",
+ "options":["listener 主题名","uorb top 命令","uorb list 命令"],
+ "answer":0,
+ "explain":"listener &lt;topic&gt; 打印最新一条数据;uorb top 看频率,uorb list 看列表。"},
+{"q":"(复习·第1课)模块入口函数的命名规则是?",
+ "options":["名为 模块名_main","普通 main 即可","任意函数都行"],
+ "answer":0,
+ "explain":"入口必须是 &lt;模块名&gt;_main 且 __EXPORT 导出,shell 才能找到它。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源(逐节对照):<a href="https://docs.px4.io/v1.17/en/modules/hello_sky.html">PX4 官方教程 v1.17《Writing your First Application (Hello Sky)》</a>。本课与它的差异:官方让你重建 <code>px4_simple_app</code>,我们写成新模块 <code>my_first_app</code>,这样你的改动可以随时 <code>git status</code> 看到,也随时可丢弃。</p>
+<p>进一步(可选):官方教程末尾的 "Publish Data" 一节,讲如何 <code>orb_advertise</code> 发布数据——第 5 课"自定义 uORB topic"会覆盖,并更进一步。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>编译报错、输出和预期不符、或者想弄懂某行代码——随时问我。把报错原文贴给我即可。下一课预告:<strong>Gazebo SITL 与数据调试</strong>——接上仿真器,让你订阅的加速度计数据"活"起来,并学会用调试命令观察整条数据流水线。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0001-px4-skeleton-uorb-shell.html">第 1 课 · PX4 的骨架</a></span>
+<span>参考:<a href="../reference/roadmap.html">课程地图</a> · <a href="../reference/glossary.html">术语表</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

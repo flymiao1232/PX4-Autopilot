@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 5 课 · 自定义 uORB topic——让模块说自己的话</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 5 课 · 自定义 uORB topic</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-01 · 约 30 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0004-task-module-scheduling.html">第 4 课</a> · 术语:<a href="../reference/glossary.html">术语表</a>
+</div>
+
+<p>阶段二"改得动"开始。前四课你都在<strong>消费</strong>别人定义的 topic(sensor_combined);真实的改代码需求往往是:<strong>定义自己的消息类型,让一个模块发布、别的模块(或地面站)订阅</strong>——比如加一个自定义传感器、把某个中间计算结果暴露出来调试。这一课就打通这条路,对应官方 <a href="https://docs.px4.io/v1.17/en/middleware/uorb.html">uORB Messaging</a>。</p>
+
+<h2>一、topic 是怎么"诞生"的</h2>
+
+<p>一个 topic 的生命周期只有三件事,比想象中简单:</p>
+
+<table class="map">
+<tr><th>步骤</th><th>做什么</th><th>产物</th></tr>
+<tr><td>1. 定义</td><td>在 <code>msg/</code> 下新建一个 <code>.msg</code> 文本文件,写字段</td><td><code>msg/LessonReport.msg</code></td></tr>
+<tr><td>2. 注册</td><td>把文件名加进 <code>msg/CMakeLists.txt</code> 的显式列表</td><td>构建系统知道要生成它</td></tr>
+<tr><td>3. 生成</td><td><code>make</code> 时生成器跑一遍,自动产出 C 结构体 + topic 标识</td><td><code>build/.../uORB/topics/lesson_report.h</code></td></tr>
+</table>
+
+<p>两个容易栽跟头的命名规则(已在 v1.17 源码中核实):</p>
+
+<ul>
+<li><strong>文件名用 PascalCase,topic 名自动变 snake_case。</strong>仓库里现在是 <code>SensorCombined.msg</code>,生成出来的 topic 是 <code>sensor_combined</code>,结构体是 <code>sensor_combined_s</code>。转换由生成器自动完成(<code>Tools/msg/px_generate_uorb_topic_files.py:101</code>),你不需要也不应该手动起名。</li>
+<li><strong>msg/CMakeLists.txt 是显式列表,不是自动扫描。</strong>漏注册的症状是:模块里 <code>#include &lt;uORB/topics/xxx.h&gt;</code> 编译报错"找不到文件"。</li>
+</ul>
+
+<p>还有一条最重要的<strong>语义</strong>,官方文档说得轻描淡写但改代码时必须内化:</p>
+
+<div class="card">
+<strong>📌 uORB 是"最新值缓存",不是队列。</strong>每个 topic 在系统里只保存一份当前数据;<code>publish</code> 会<strong>覆盖</strong>上一份;新订阅者接入时立刻拿到当前值(哪怕是一秒前发布的)。所以"发布快、订阅慢"不会积压消息,但订阅者可能漏掉中间值。想验证这点,本课最后会用 <code>uorb top</code> 亲眼看到发布频率。
+</div>
+
+<h2>二、动手:发布你自己的 topic</h2>
+
+<p>场景:让你的 <code>my_first_app</code> 不光打印加速度,还把"加速度模长"作为自定义 topic <code>lesson_report</code> 发布出去,然后用 <code>listener</code> 在另一个终端观察。</p>
+
+<ol class="steps">
+<li>
+<p>新建 <code>msg/LessonReport.msg</code>:</p>
+<pre><code>uint64 timestamp		# time since system start (microseconds)
+
+float32 accel_magnitude		# 加速度模长 m/s^2
+uint32 sample_count		# 已处理的样本总数</code></pre>
+<p>字段类型就是 C 的 <code>uint64/float32/...</code>,支持数组如 <code>float32[3]</code>;<code>#</code> 后是注释。第一个字段固定叫 <code>timestamp</code>(微秒,用 <code>hrt_absolute_time()</code> 填),这是 PX4 所有消息的惯例,日志系统依赖它。</p>
+</li>
+<li>
+<p>注册进 <code>msg/CMakeLists.txt</code>:打开它,在 <code>LedControl.msg</code> 和 <code>LoggerStatus.msg</code> 之间插入一行(列表按字母序):</p>
+<pre><code>	LedControl.msg
+	LessonReport.msg    <span class="comment" style="color:#777"># ← 新增</span>
+	LoggerStatus.msg</code></pre>
+</li>
+<li>
+<p>重新编译,确认生成物出现:</p>
+<pre class="terminal"><code>make px4_sitl_default
+<span class="comment"># 生成器产物(可以打开看看,结构体 lesson_report_s 就在里面):</span>
+build/px4_sitl_default/uORB/topics/lesson_report.h</code></pre>
+</li>
+<li>
+<p>改造 <code>my_first_app.cpp</code>,让它发布(头文件 <code>my_first_app.hpp</code> 里加成员,实现文件里加逻辑):</p>
+<pre><code><span class="comment" style="color:#777">// my_first_app.hpp —— 类成员,放在已有订阅 fd 旁边:</span>
+#include &lt;uORB/Publication.hpp&gt;
+#include &lt;uORB/topics/lesson_report.h&gt;
+...
+	uORB::Publication&lt;lesson_report_s&gt; _lesson_report_pub{ORB_ID(lesson_report)};</code></pre>
+<pre><code><span class="comment" style="color:#777">// my_first_app.cpp —— 在 orb_copy 拿到 raw 之后,替换原来的 PX4_INFO:</span>
+#include &lt;math.h&gt;
+...
+			float mag = sqrtf(raw.accelerometer_m_s2[0] * raw.accelerometer_m_s2[0]
+					  + raw.accelerometer_m_s2[1] * raw.accelerometer_m_s2[1]
+					  + raw.accelerometer_m_s2[2] * raw.accelerometer_m_s2[2]);
+
+			lesson_report_s report{};
+			report.timestamp = hrt_absolute_time();
+			report.accel_magnitude = mag;
+			report.sample_count++;
+			_lesson_report_pub.publish(report);    <span class="comment" style="color:#777">// 首次 publish 时自动 advertise</span></code></pre>
+<p>这里换成了 C++ 风格的 <code>uORB::Publication&lt;T&gt;</code>(v1.17 主流写法,work_item 示例同款):构造时绑好 topic,调用 <code>publish()</code> 就行,不用手动 <code>orb_advertise</code>。它是个模板类,尖括号里是生成结构体,花括号里是 <code>ORB_ID</code>。</p>
+</li>
+<li>
+<p>运行验证(接 Gazebo,<code>HEADLESS=1 make px4_sitl gz_x500</code>),开一个 <a href="0003-gazebo-sitl-data-debugging.html">MAVLink shell</a> 第二个终端:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app start       <span class="comment"># 终端1:模块跑起来</span>
+<span class="prompt">pxh&gt;</span> uorb top                  <span class="comment"># 终端2:能看到 lesson_report,约 1 Hz(orb_set_interval 限的)</span>
+<span class="prompt">pxh&gt;</span> listener lesson_report    <span class="comment"># 打印最新一条:accel_magnitude ≈ 9.8(悬停),sample_count 递增</span></code></pre>
+<p>两个观察点,直接印证第一部分的语义:① topic 在 <code>start</code> 之前<strong>不存在</strong>——uORB 里没有"声明",只有"第一次发布";② <code>listener</code> 拿到的是<em>最新一份</em>,不是历史队列。</p>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你打通了 PX4 改代码最核心的一条路:<strong>定义消息 → 注册 → 生成 → 发布 → 观察</strong>。从此以后,"我想让模块 A 的数据被模块 B 看到"对你不再是黑盒——这也是 ROS/DDS 那条上层链路底下正在发生的事。
+</div>
+
+<h2>三、课后探索(可选)</h2>
+<p>打开 <code>msg/OrbTest.msg</code>,注意最后一行 <code># TOPICS orb_test orb_multitest</code>。这一条指令让<strong>一个消息定义</strong>同时生成 <code>orb_test</code> 和 <code>orb_multitest</code> 两个 topic(测试"多实例"用)。想想什么场景会需要:提示——同款传感器有多个实例时,PX4 用同一个 msg 文件生成 <code>sensor_accel</code> 的第 0/1/2 号实例。</p>
+
+<h2>四、自测(含复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"本仓库中,新 topic 的名字(如 lesson_report)最终由什么决定?",
+ "options":["由 .msg 文件名自动转换","由 msg 文件首行指定","由 ORB_ID 宏的参数决定"],
+ "answer":0,
+ "explain":"生成器把 PascalCase 文件名转 snake_case 作为 topic 名与结构体名(px_generate_uorb_topic_files.py)。"},
+{"q":"新建 .msg 后忘记在 msg/CMakeLists.txt 注册,会发生什么?",
+ "options":["编译报找不到生成的头文件","topic 名退化为小写乱码","构建静默成功但无数据"],
+ "answer":0,
+ "explain":"该列表是显式的,不注册就不生成头文件,模块里的 #include 直接编译失败。"},
+{"q":"uORB topic 默认的存储语义,正确的描述是?",
+ "options":["只保留最新一份可覆盖","保留全部发布历史队列","按时间戳自动滚动归档"],
+ "answer":0,
+ "explain":"last-value-cached:publish 覆盖旧值,新订阅者立刻拿到当前值。"},
+{"q":"(复习·第4课)收到 stop 后,ModuleBase 模块的 run() 靠什么退出循环?",
+ "options":["should_exit() 变为真","线程被立即强制杀死","poll 超时后自然退出"],
+ "answer":0,
+ "explain":"stop 设置退出标志,run() 里 while (!should_exit()) 优雅收尾。"},
+{"q":"(复习·第3课)在 shell 里查看某 topic 当前最新一条数据的命令是?",
+ "options":["listener 加 topic 名","uorb top 加 topic 名","param show 加名字"],
+ "answer":0,
+ "explain":"listener 打印最新值;uorb top 看的是发布频率统计。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/middleware/uorb.html">官方 uORB Messaging(v1.17)</a>;命名与注册规则核对自本仓库 <code>Tools/msg/px_generate_uorb_topic_files.py</code> 与 <code>msg/CMakeLists.txt</code>;发布用法对照 <code>src/examples/work_item/WorkItemExample.hpp</code>。课程中的 C++ 片段已经过真实编译参数(含 <code>-Werror</code>)语法验证。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>编译报错、生成器行为、C++ 模板写法看不懂,或者想把自己的真实需求(具体传感器/具体数据)套进这个流程——随时问。下一课:<strong>参数系统</strong>——让你的模块行为可配置(param show / param set),不再要改数据就得重编译。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0004-task-module-scheduling.html">第 4 课 · 正式模块与调度</a></span>
+<span>参考:<a href="../reference/glossary.html">术语表</a> · <a href="../reference/roadmap.html">课程地图</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · PX4 术语表</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · PX4 术语表</h1>
+<div class="lesson-meta">打印友好 · 随课程持续扩充 · 所有课程统一使用本表术语</div>
+
+<p>本表收录 PX4 开发的核心术语。词条按"改代码时会在哪遇到"排序。首次出现的课程会标注。</p>
+
+<table class="map">
+<tr><th>术语</th><th>一句话定义</th><th>在哪遇到</th></tr>
+<tr><td>模块 (Module)</td><td>PX4 中独立编译、可在 shell 作为命令运行的程序单元</td><td>src/modules/、src/examples/</td></tr>
+<tr><td>uORB</td><td>PX4 的消息总线:模块通过发布/订阅 topic 交换数据的唯一标准机制</td><td>所有模块间通信</td></tr>
+<tr><td>topic</td><td>uORB 上的一类消息,由 msg/*.msg 定义,有唯一的 ORB_ID</td><td>msg/ 目录、uorb list</td></tr>
+<tr><td>ORB_ID(xxx)</td><td>编译时从 .msg 自动生成的 topic 标识常量</td><td>orb_subscribe / orb_advertise 调用</td></tr>
+<tr><td>uORB::Publication&lt;T&gt;</td><td>C++ 发布端封装:构造时绑定 topic,调用 publish() 即发布,首次自动 advertise</td><td><a href="../lessons/0005-custom-uorb-topic.html">第 5 课</a>、各模块头文件成员</td></tr>
+<tr><td>last-value-cached</td><td>uORB 默认语义:每个 topic 只存最新一份数据,publish 覆盖,新订阅者立刻拿到当前值</td><td><a href="../lessons/0005-custom-uorb-topic.html">第 5 课</a></td></tr>
+<tr><td>.msg(PascalCase)</td><td>topic 定义文件,文件名 PascalCase;生成器自动转 snake_case 作为 topic/结构体名</td><td>msg/ 目录</td></tr>
+<tr><td>msg/CMakeLists.txt</td><td>.msg 的<strong>显式</strong>注册列表:新增消息必须手动加入,否则不生成头文件</td><td><a href="../lessons/0005-custom-uorb-topic.html">第 5 课</a></td></tr>
+<tr><td>px4_add_module</td><td>CMake 宏,把一个目录注册为 PX4 模块并编译进固件/SITL</td><td>各模块的 CMakeLists.txt</td></tr>
+<tr><td>&lt;模块名&gt;_main</td><td>模块入口函数的强制命名,需 __EXPORT 导出后 shell 才能运行</td><td>每个模块的入口源文件</td></tr>
+<tr><td>PX4 shell (pxh&gt;)</td><td>SITL/板载的交互命令行,前身叫 NSH;运行模块与调试命令的地方</td><td>./build/.../bin/px4</td></tr>
+<tr><td>SITL</td><td>Software-In-The-Loop:在电脑上跑完整 PX4 进行仿真验证</td><td>make px4_sitl_default</td></tr>
+<tr><td>EKF2</td><td>扩展卡尔曼滤波状态估计器:输出位置、速度、姿态</td><td>src/modules/ekf2</td></tr>
+<tr><td>sensor_combined</td><td>sensors 模块融合后的 IMU 数据 topic</td><td>estimator 的输入</td></tr>
+<tr><td>vehicle_attitude</td><td>EKF2 输出的姿态(四元数)topic</td><td>控制器输入</td></tr>
+<tr><td>actuator_motors</td><td>控制器输出的归一化电机/舵机指令 topic</td><td>控制链末端</td></tr>
+<tr><td>commander</td><td>决策模块:处理解锁、飞行模式切换、安全状态机</td><td>src/modules/commander</td></tr>
+<tr><td>navigator</td><td>任务/航点导航模块:产生期望位置与航线</td><td>src/modules/navigator</td></tr>
+<tr><td>px4board</td><td>板级 Kconfig 配置文件,决定哪些模块编译进目标</td><td>boards/*/*.px4board</td></tr>
+<tr><td>Kconfig</td><td>编译开关系统:每个模块的 Kconfig 定义 CONFIG_ 符号,px4board 置 y 才编译</td><td>各模块目录的 Kconfig</td></tr>
+<tr><td>ROMFS</td><td>打包进固件的只读文件系统:启动脚本 rcS、默认参数</td><td>ROMFS/px4fmu_common/init.d</td></tr>
+<tr><td>MAVLink</td><td>飞控与地面站/机载电脑间的通信协议</td><td>src/modules/mavlink</td></tr>
+<tr><td>Gazebo (gz)</td><td>SITL 标准的物理仿真器(Harmonic/gz-sim8),与 PX4 经 gz-transport 通信</td><td><code>make px4_sitl gz_x500</code>、HEADLESS=1</td></tr>
+<tr><td>gz_bridge</td><td>PX4 模块:PX4 ↔ Gazebo 之间的数据翻译官(传感器进、电机指令出)</td><td>src/modules/simulation/gz_bridge</td></tr>
+<tr><td>仿真机型 (gz_x500 等)</td><td>ROMFS init.d-posix/airframes/ 下的机型脚本,决定仿真用哪个模型与世界</td><td>4001_gz_x500 等</td></tr>
+<tr><td>MAVLink shell</td><td>经 mavlink 链路远程执行 nsh 命令的 shell,用于开第二个调试终端</td><td>Tools/mavlink_shell.py</td></tr>
+<tr><td>ULog</td><td>PX4 的飞行日志格式,记录所有 uORB 数据</td><td>src/modules/logger</td></tr>
+<tr><td>listener</td><td>shell 命令:打印指定 topic 的最新数据</td><td>src/systemcmds</td></tr>
+<tr><td>param</td><td>飞控参数系统:shell 命令 + 模块读取的运行时配置</td><td>src/systemcmds/param、ROMFS 参数文件</td></tr>
+<tr><td>work queue</td><td>PX4 的调度机制:轻量模块以 ScheduledWorkItem 挂共享队列按周期唤醒,而非独占线程</td><td><a href="../lessons/0004-task-module-scheduling.html">第 4 课</a>、src/examples/work_item</td></tr>
+<tr><td>ModuleBase</td><td>提供 start/stop/status 命令骨架的 C++ 基类,模块只需填 task_spawn/run 等五个槽</td><td><a href="../lessons/0004-task-module-scheduling.html">第 4 课</a>、<a href="module-anatomy.html">模块骨架速查</a></td></tr>
+</table>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0001-px4-skeleton-uorb-shell.html">第 1 课</a></span>
+<span>工作区:<a href="../MISSION.md">MISSION.md</a></span>
+</footer>
+
+</body>
+</html>
