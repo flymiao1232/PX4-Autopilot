@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 6 课 · 参数系统——让模块行为可配置</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 6 课 · 参数系统</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-04 · 约 30 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0005-custom-uorb-topic.html">第 5 课</a> · 速查:<a href="../reference/param-cheatsheet.html">参数速查</a> · 术语:<a href="../reference/glossary.html">术语表</a>
+</div>
+
+<p>上一课你的模块开始<strong>发布</strong>数据了,但行为还是写死的:想关掉打印只能重新编译。真实需求是"试飞时随时调":阈值、开关、周期都应该是<strong>参数</strong>——不改代码、不重编译,shell 里 <code>param set</code> 立即生效,还能存进存储器断电不丢。对应官方 <a href="https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html">Parameters &amp; Configurations</a>。这一课给 my_first_app 装上第一个参数 <code>LR5_PUB_EN</code>。</p>
+
+<h2>第 0 步 · 热身:抓一个 bug(5 分钟)</h2>
+
+<p>先运行上一课的模块,开一个 <a href="0003-gazebo-sitl-data-debugging.html">MAVLink shell</a>:</p>
+
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app start
+<span class="prompt">pxh&gt;</span> listener lesson_report    <span class="comment"># 连续执行几次,盯住 sample_count</span></code></pre>
+
+<p>发现了么:<code>sample_count</code> 永远停在 1。回想第 5 课的语义——uORB 是 last-value-cached,所以能看到数据;但计数不涨的根因在<strong>你自己的代码</strong>:<code>lesson_report_s report{}</code> 声明在 while 循环<strong>内部</strong>,每次循环 <code>{}</code> 把结构体清零,再 <code>sample_count++</code> 永远是从 0 到 1。</p>
+
+<div class="card">
+<strong>📌 修复(一行):</strong>你的 my_first_app.hpp 里已经躺着一个当时没派上用场的成员 <code>uint32_t _sample_count{0}</code>——它就是为这里准备的。把 cpp 里的 <code>report.sample_count++;</code> 改成 <code>report.sample_count = ++_sample_count;</code>。重新编译后再看 listener:计数每秒 +1。<strong>成员变量的生命周期跨循环迭代,循环内的局部变量每次都重生</strong>——这个坑在嵌入式里极其常见。
+</div>
+
+<h2>一、参数系统的三件事</h2>
+
+<p>参数比 topic 更省心,生命周期只有三件:</p>
+
+<table class="map">
+<tr><th>步骤</th><th>做什么</th><th>产物</th></tr>
+<tr><td>1. 定义</td><td>在模块目录建 <code>*_params.c</code>,用 <code>PARAM_DEFINE_INT32(名字, 默认值)</code> 写参数</td><td><code>my_first_app_params.c</code></td></tr>
+<tr><td>2. 收集</td><td>构建时 <code>px_process_params.py</code> 自动扫描所有 <code>*params.c</code>,解析注释生成参数存储</td><td><code>build/.../parameters.xml</code>、<code>px4_parameters.hpp</code></td></tr>
+<tr><td>3. 读写</td><td>代码里 <code>param_find</code> 拿句柄 + <code>param_get</code> 读值;shell 里 <code>param set/show/save</code></td><td>运行时行为可改、可存</td></tr>
+</table>
+
+<p>三个已在 v1.17 源码核实的非显然事实:</p>
+
+<ul>
+<li><strong><code>*params.c</code> 是被"解析"而不是被"编译"的。</strong>它里面没有 include、没有代码,只有 doxygen 注释 + <code>PARAM_DEFINE_*</code> 宏——构建脚本把它当<strong>元数据文本</strong>读(<code>src/lib/parameters/CMakeLists.txt:119</code> 用 GLOB 收集,所以<strong>不用改任何 CMakeLists</strong>)。对照第 5 课:msg 是显式注册列表,params 是自动收集,方向正好相反。</li>
+<li><strong>⚠️ 最大的坑:GLOB 在 cmake 配置时求值。</strong>新建 params.c 后如果直接 <code>make</code>,参数很可能不存在——cmake 不知道有新文件了。症状:<code>param_find</code> 返回 <code>PARAM_INVALID</code>(定义见 <code>src/lib/parameters/param.h:78</code>)。对策:<code>touch src/lib/parameters/CMakeLists.txt &amp;&amp; make px4_sitl_default</code> 强制重新配置(不行就 <code>make clean</code> 重来)。</li>
+<li><strong>参数名 ≤ 16 个字符</strong>(<code>src/lib/parameters/px4params/srcparser.py:370</code>,超限直接报错),全大写 + 模块前缀是惯例,如 <code>LR5_PUB_EN</code>。</li>
+</ul>
+
+<div class="card">
+<strong>📌 参数 vs topic,一句判别法:</strong>参数是"配置"——慢变、有默认值、可持久化,回答"模块<strong>应该怎么</strong>工作";topic 是"数据"——快变、只留最新一份,回答"系统<strong>正在</strong>发生什么"。拿不准时问自己:这个值改了之后需要断电保存吗?
+</div>
+
+<h2>二、动手:给 my_first_app 加开关参数</h2>
+
+<ol class="steps">
+<li>
+<p>新建 <code>src/examples/my_first_app/my_first_app_params.c</code>(<strong>不需要任何 include</strong>,全文件就这内容):</p>
+<pre><code>/**
+ * Enable lesson report publishing
+ *
+ * Set to 0 to stop publishing the lesson_report topic at runtime.
+ *
+ * @boolean
+ * @group My First App
+ */
+PARAM_DEFINE_INT32(LR5_PUB_EN, 1);</code></pre>
+<p>注释是元数据:<code>@boolean</code> 声明它是开关,<code>@group</code> 决定它在地面站参数树里的分组;宏的第二个参数 <code>1</code> 是<strong>默认值</strong>。参考实例:<code>src/modules/land_detector/land_detector_params.c</code>、<code>src/modules/zenoh/zenoh_params.c</code>。</p>
+</li>
+<li>
+<p>强制重新配置并编译(第 1 次加 params.c 必做):</p>
+<pre class="terminal"><code>touch src/lib/parameters/CMakeLists.txt
+make px4_sitl_default</code></pre>
+</li>
+<li>
+<p>起 SITL,先验证<strong>参数本身</strong>存在(这一步和模块运不运行无关):</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> param show LR5*        <span class="comment"># 应看到 LR5_PUB_EN = 1</span></code></pre>
+<p>如果报 "no params found",就是第 2 步的配置没生效,回去重来——这是你一定会遇到一次的坑,先认认它的样子。</p>
+</li>
+<li>
+<p>改造 <code>my_first_app.cpp</code>(头文件<strong>不用动</strong>):</p>
+<pre><code><span class="comment" style="color:#777">// 顶部 include 区加:</span>
+#include &lt;parameters/param.h&gt;</code></pre>
+<pre><code><span class="comment" style="color:#777">// run() 里,while 循环之前:查一次句柄(句柄不变,值会变)</span>
+	param_t pub_en = param_find("LR5_PUB_EN");
+
+	if (pub_en == PARAM_INVALID) {
+		PX4_ERR("LR5_PUB_EN not found");
+		return;
+	}</code></pre>
+<pre><code><span class="comment" style="color:#777">// 循环内,px4_poll 之后:每轮读最新值</span>
+		int32_t pub_en_val = 0;
+		param_get(pub_en, &amp;pub_en_val);   <span class="comment" style="color:#777">// param set 立即生效的秘密</span>
+
+		if ((fds[0].revents &amp; POLLIN) &amp;&amp; pub_en_val) {   <span class="comment" style="color:#777">// ← 原 if 加条件</span></code></pre>
+<p>用法对照真实模块:<code>src/modules/uxrce_dds_client/uxrce_dds_client.cpp:1034</code> 同款 <code>param_get(param_find(...), &amp;x)</code>;include 路径 <code>&lt;parameters/param.h&gt;</code> 对照 <code>src/modules/mavlink/mavlink_main.h:62</code>。</p>
+</li>
+<li>
+<p>编译、运行、亲手拨动开关:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> my_first_app start
+<span class="prompt">pxh&gt;</span> uorb top                  <span class="comment"># lesson_report ~1 Hz</span>
+<span class="prompt">pxh&gt;</span> param set LR5_PUB_EN 0    <span class="comment"># ★ 不用重启!uorb top 里 lesson_report 消失</span>
+<span class="prompt">pxh&gt;</span> listener lesson_report    <span class="comment"># 还能打印!印证第5课:last-value-cached,旧值还在</span>
+<span class="prompt">pxh&gt;</span> param set LR5_PUB_EN 1    <span class="comment"># 恢复发布</span>
+<span class="prompt">pxh&gt;</span> param save               <span class="comment"># 持久化:重启 SITL 后仍是 1</span>
+<span class="prompt">pxh&gt;</span> param reset LR5_PUB_EN    <span class="comment"># (可选)恢复代码里的默认值</span></code></pre>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你的模块从"写死"变成了"可配置"。"定义参数 → 重新配置构建 → 运行时拨动"这条路上,唯一会咬人的就是 cmake GLOB 缓存那一口——咬过一次就免疫了。至此,<a href="../reference/roadmap.html">阶段二</a>只剩最后一课:启动流程(让模块开机自启)。
+</div>
+
+<h2>三、课后探索(可选)</h2>
+<p>真实模块并不每轮循环 <code>param_get</code>,而是继承 <code>ModuleParams</code>(<code>px4_platform_common/module_params.h</code>)+ 订阅 <code>parameter_update</code> topic,参数一变就被回调通知、缓存自动刷新。搜一下 <code>DEFINE_PARAMETERS</code> 看 mc_att_control 的写法——那是 C++ 主流写法,本课 C API 是它的底层。想想:本课"循环内每轮读"的方案在什么频率下会变成浪费?</p>
+
+<h2>四、自测(含复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"本仓库中,新 *params.c 文件如何进入构建?",
+ "options":["构建脚本自动收集无需注册","必须注册进根 CMakeLists","需要加入模块 SRCS 列表"],
+ "answer":0,
+ "explain":"src/lib/parameters/CMakeLists.txt:119 用 GLOB_RECURSE 自动收集 src/ 下所有 *params.c 并解析生成参数存储。"},
+{"q":"param_find 查不到参数时返回什么?",
+ "options":["空指针 nullptr","PARAM_INVALID 句柄","负一的整数错误码"],
+ "answer":1,
+ "explain":"返回 PARAM_INVALID(0xffff),param.h:78;这正是新 params.c 未触发 cmake 重配置时的典型症状。"},
+{"q":"(复习·第5课)topic 名 lesson_report 最终由什么决定?",
+ "options":["由 msg 文件首行声明","由 ORB_ID 宏参数决定","由 msg 文件名自动转换"],
+ "answer":2,
+ "explain":"生成器把 PascalCase 文件名转 snake_case;ORB_ID 只是引用已生成的标识。"},
+{"q":"想让 param set 立即生效,本课采用的做法是?",
+ "options":["每轮循环都 param_get 读值","重启模块后重新读一次","订阅 parameter_update 通知"],
+ "answer":0,
+ "explain":"句柄 start 时查一次,值在循环内每轮读;parameter_update 订阅是真实模块的进阶做法(见课后探索)。"},
+{"q":"(复习·第3课)listener 与 uorb top 的分工是?",
+ "options":["看频率与看最新值","看最新值与看频率","看参数与看日志"],
+ "answer":1,
+ "explain":"listener 打印 topic 最新一条;uorb top 看发布频率统计。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html">官方 Parameters &amp; Configurations(v1.17)</a>;机制核对自本仓库 <code>src/lib/parameters/CMakeLists.txt</code>(GLOB 收集、DEPENDS 陈旧)、<code>src/lib/parameters/param.h</code>(C API、PARAM_INVALID)、<code>px4params/srcparser.py:370</code>(16 字符上限);实例对照 land_detector、zenoh、uxrce_dds_client。课程 C++ 片段已经过真实编译参数(含 <code>-Werror</code>)语法验证。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>param_find 返回 PARAM_INVALID、param set 不生效、地面站里参数不显示——任何一步卡住都可以把报错贴给我。另外如果你对"参数存在哪里、重启后为什么还在"的存储机制好奇,这也是个好问题,随时问。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0005-custom-uorb-topic.html">第 5 课 · 自定义 uORB topic</a></span>
+<span>参考:<a href="../reference/param-cheatsheet.html">参数速查</a> · <a href="../reference/glossary.html">术语表</a> · <a href="../reference/roadmap.html">课程地图</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

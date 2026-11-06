@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · 启动流程速查</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · 启动流程速查</h1>
+<div class="lesson-meta">
+打印友好 · <a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a> 配套 · 所有行号均为 v1.17 本地仓库核实
+</div>
+
+<h2>SITL 启动链一图流</h2>
+
+<pre><code>make px4_sitl gz_x500
+  │  gz_bridge/CMakeLists.txt:106  设 PX4_SIM_MODEL=gz_x500,启动 bin/px4
+  ▼
+bin/px4  (main.cpp:286 默认脚本 etc/init.d-posix/rcS,-s 可换)
+  │  main.cpp:546  system("/bin/sh etc/init.d-posix/rcS")   ← 宿主机 shell!
+  ▼
+init.d-posix/rcS:
+  ① param import(读 parameters.bson)+ param set-default 一批
+  ② 用 PX4_SIM_MODEL 匹配 airframes/ 文件名 → SYS_AUTOSTART=4001
+  ③ source airframes/4001_gz_x500     ← 机型默认参数(CA_ROTOR*、MPC_THR_HOVER…)
+  ④ dataman / 仿真器(px4-rc.simulator)/ sensors / commander / ekf2 start
+  ⑤ . rc.vehicle_setup → rc.mc_apps   ← mc_rate_control 等机型应用
+  ⑥ navigator / uxrce_dds / logger
+  ⑦ mavlink boot_complete             ← pxh&gt; 出现</code></pre>
+
+<h2>关键事实(都是踩坑点)</h2>
+
+<table class="map">
+<tr><th>事实</th><th>出处</th></tr>
+<tr><td>rcS 由<strong>宿主机</strong> /bin/sh 执行,px4-alias.sh 翻译 NuttX 语法</td><td>platforms/posix/.../main.cpp:546</td></tr>
+<tr><td>SITL 一模块一进程:bin/ 下每个模块一个 <code>px4-*</code> 可执行文件</td><td>build/px4_sitl_default/bin/</td></tr>
+<tr><td>rcS 首行 <code>set +e</code>:模块 start 失败<strong>不中止</strong>开机,只写日志</td><td>init.d-posix/rcS:6</td></tr>
+<tr><td>机架文件名 = <code>&lt;ID&gt;_&lt;模型名&gt;</code>,ID 即 SYS_AUTOSTART</td><td>init.d-posix/airframes/4001_gz_x500</td></tr>
+<tr><td>ROMFS 源目录改动后必须 <code>make</code> 才会拷进 build/etc</td><td>init.d-posix/CMakeLists.txt:37 px4_add_romfs_files</td></tr>
+<tr><td>改 ROMFS/<strong>源文件</strong>,别改 build/ 副本(下次构建被覆盖)</td><td>—</td></tr>
+</table>
+
+<h2>自启挂载点速选</h2>
+
+<table class="map">
+<tr><th>需求</th><th>写在哪</th></tr>
+<tr><td>所有 SITL 机型都自启</td><td><code>ROMFS/px4fmu_common/init.d-posix/rcS</code> 尾部(boot_complete 之前)</td></tr>
+<tr><td>只在某机型自启</td><td>该机型的机架文件,如 <code>init.d-posix/airframes/4001_gz_x500</code></td></tr>
+<tr><td>真实硬件不改固件</td><td>SD 卡 <code>/fs/microsd/etc/extras.txt</code>(开机末尾自动 source,init.d/rcS:599)</td></tr>
+<tr><td>整场换掉启动脚本(最小复现)</td><td><code>bin/px4 -s my_script.txt</code></td></tr>
+</table>
+
+<h2>rcS 常用语法糖</h2>
+
+<pre><code>param set-default NAME val   <span class="comment" style="color:#777"># 设默认值:仅在参数未存过值时生效</span>
+param set NAME val           <span class="comment" style="color:#777"># 强制设值(覆盖已存的)</span>
+param compare -s NAME val    <span class="comment" style="color:#777"># 相等则返回真 → 用作 if 守卫(-s:静默)</span>
+set VAR val  /  $VAR         <span class="comment" style="color:#777"># 脚本变量(px4-alias.sh 翻译成 shell 变量)</span>
+. file                       <span class="comment" style="color:#777"># source 另一个脚本(rcS 的灵魂)</span>
+command &amp;                    <span class="comment" style="color:#777"># 后台启动(如 ekf2 start &amp;)</span></code></pre>
+
+<h2>自启排障三连</h2>
+
+<ol class="steps">
+<li>翻主终端(运行 bin/px4 那个)的启动日志——自启失败只在这里留痕。</li>
+<li>pxh&gt; 里 <code>&lt;模块&gt; status</code>:模块自己汇报活没活。</li>
+<li>pxh&gt; 里 <code>uorb top</code>:该模块的 topic 有没有在发布。</li>
+</ol>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0007-startup-rcs-autostart.html">第 7 课 · 启动流程</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="roadmap.html">课程地图</a></span>
+</footer>
+
+</body>
+</html>

@@ -1,3 +1,4 @@
+#include <parameters/param.h>
 #include "my_first_app.hpp"
 
 #include <px4_platform_common/log.h>
@@ -8,6 +9,8 @@
 
 #include <uORB/uORB.h>
 #include <uORB/topics/sensor_combined.h>
+
+#include <math.h>
 
 int MyFirstApp::print_status()
 {
@@ -57,16 +60,31 @@ void MyFirstApp::run()
 	fds[0].fd = sensor_sub_fd;
 	fds[0].events = POLLIN;
 
+	param_t pub_en = param_find("LR5_PUB_EN");  // 新增
+
+	if(pub_en == PARAM_INVALID) {
+		PX4_ERR("param LR5_PUB_EN not found");
+		return;
+	}
 	while (!should_exit()) {          // stop 命令会把它变为 true
 		px4_poll(fds, 1, 1000);
-
-		if (fds[0].revents & POLLIN) {
+		int32_t pub_en_val = 0;
+		param_get(pub_en, &pub_en_val);  // 新增
+		if((fds[0].revents & POLLIN) && (pub_en_val != 0)) {  // 新增
 			struct sensor_combined_s raw;
 			orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &raw);
 			PX4_INFO("Accel:\t%8.4f\t%8.4f\t%8.4f",
 				 (double)raw.accelerometer_m_s2[0],
 				 (double)raw.accelerometer_m_s2[1],
 				 (double)raw.accelerometer_m_s2[2]);
+			float mag = sqrtf(raw.accelerometer_m_s2[0] * raw.accelerometer_m_s2[0]
+					  + raw.accelerometer_m_s2[1] * raw.accelerometer_m_s2[1]
+					  + raw.accelerometer_m_s2[2] * raw.accelerometer_m_s2[2]);
+			lesson_report_s report{};
+			report.timestamp = hrt_absolute_time();
+			report.accel_magnitude = mag;
+			report.sample_count=++_sample_count;
+			_lesson_report_pub.publish(report);    // 首次 publish 时自动 advertis
 		}
 	}
 

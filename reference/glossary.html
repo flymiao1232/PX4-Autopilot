@@ -43,7 +43,22 @@
 <tr><td>MAVLink shell</td><td>经 mavlink 链路远程执行 nsh 命令的 shell,用于开第二个调试终端</td><td>Tools/mavlink_shell.py</td></tr>
 <tr><td>ULog</td><td>PX4 的飞行日志格式,记录所有 uORB 数据</td><td>src/modules/logger</td></tr>
 <tr><td>listener</td><td>shell 命令:打印指定 topic 的最新数据</td><td>src/systemcmds</td></tr>
-<tr><td>param</td><td>飞控参数系统:shell 命令 + 模块读取的运行时配置</td><td>src/systemcmds/param、ROMFS 参数文件</td></tr>
+<tr><td>param</td><td>飞控参数系统:慢变、有默认值、可持久化的运行时配置,与快变的 topic 相对</td><td>src/systemcmds/param、<a href="../lessons/0006-param-system.html">第 6 课</a></td></tr>
+<tr><td>*_params.c</td><td>参数定义文件:只含 doxygen 注释 + PARAM_DEFINE_*,被构建脚本<strong>解析而非编译</strong></td><td><a href="../lessons/0006-param-system.html">第 6 课</a></td></tr>
+<tr><td>PARAM_DEFINE_INT32 / _FLOAT</td><td>定义一个参数及其默认值的宏;名字 ≤16 字符、全大写带模块前缀</td><td>各模块目录的 *_params.c</td></tr>
+<tr><td>param_find / param_get</td><td>C 参数 API:按名字查句柄(查不到返回 PARAM_INVALID)/ 按句柄读当前值</td><td><a href="../lessons/0006-param-system.html">第 6 课</a>、&lt;parameters/param.h&gt;</td></tr>
+<tr><td>parameter_update</td><td>参数变化时发布的 uORB topic,模块订阅它实现"参数一变自动刷新"</td><td>课后探索、ModuleParams</td></tr>
+<tr><td>vehicle_attitude_setpoint</td><td>姿态期望 topic:链路最上游,指挥官/导航或手动摇杆产生</td><td><a href="../lessons/0008-control-chain.html">第 8 课</a></td></tr>
+<tr><td>vehicle_rates_setpoint</td><td>角速度期望 topic:姿态环(mc_att_control)的输出、内环的输入</td><td><a href="../lessons/0008-control-chain.html">第 8 课</a></td></tr>
+<tr><td>vehicle_angular_velocity</td><td>陀螺仪角速度 topic:内环(mc_rate_control)的反馈与"心跳"</td><td><a href="../lessons/0008-control-chain.html">第 8 课</a></td></tr>
+<tr><td>vehicle_thrust_setpoint / vehicle_torque_setpoint</td><td>推力/力矩设定点:角速度环输出(v1.17 起取代旧 actuator_controls_0)</td><td><a href="../lessons/0008-control-chain.html">第 8 课</a></td></tr>
+<tr><td>control_allocator</td><td>控制分配模块:把推力+力矩按 CA_ROTOR* 电机布局解算为 actuator_motors</td><td>src/modules/control_allocator、<a href="../lessons/0008-control-chain.html">第 8 课</a></td></tr>
+<tr><td>pxh&gt; 命令</td><td>rcS 与 pxh&gt; 里敲的命令是同一套;SITL 里每条命令对应 bin/ 下一个 px4-* 进程</td><td><a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a></td></tr>
+<tr><td>rcS(启动脚本)</td><td>开机自动执行的命令链:SITL 在 init.d-posix/rcS,硬件在 init.d/rcS;由宿主机 /bin/sh(SITL)或 NuttX shell 执行</td><td><a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a>、ROMFS/px4fmu_common/init.d*</td></tr>
+<tr><td>机架文件 (airframe file)</td><td>机型配置脚本,文件名 <code>&lt;ID&gt;_&lt;模型名&gt;</code>;设机型默认参数(电机布局、机型类型),ID 即 SYS_AUTOSTART</td><td>init.d-posix/airframes/4001_gz_x500、<a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a></td></tr>
+<tr><td>SYS_AUTOSTART</td><td>机架 autostart ID 参数:决定开机 source 哪个机架文件;SITL 由 PX4_SIM_MODEL 环境变量自动推出</td><td><a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a></td></tr>
+<tr><td>px4-rc.* / rc.*_apps</td><td>rcS source 的子脚本:rc.vehicle_setup 按机型类型分派到 rc.mc_apps 等应用清单</td><td>ROMFS/px4fmu_common/init.d</td></tr>
+<tr><td>extras.txt</td><td>SD 卡 /fs/microsd/etc/extras.txt:硬件开机末尾自动 source,不改固件加自定义启动命令</td><td><a href="../lessons/0007-startup-rcs-autostart.html">第 7 课</a>、init.d/rcS:599</td></tr>
 <tr><td>work queue</td><td>PX4 的调度机制:轻量模块以 ScheduledWorkItem 挂共享队列按周期唤醒,而非独占线程</td><td><a href="../lessons/0004-task-module-scheduling.html">第 4 课</a>、src/examples/work_item</td></tr>
 <tr><td>ModuleBase</td><td>提供 start/stop/status 命令骨架的 C++ 基类,模块只需填 task_spawn/run 等五个槽</td><td><a href="../lessons/0004-task-module-scheduling.html">第 4 课</a>、<a href="module-anatomy.html">模块骨架速查</a></td></tr>
 </table>

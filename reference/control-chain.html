@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · 多旋翼控制链路图</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · 多旋翼控制链路图</h1>
+<div class="lesson-meta">
+打印友好 · <a href="../lessons/0008-control-chain.html">第 8 课</a> 配套 · 行号为 v1.17 本地仓库核实
+</div>
+
+<h2>一条链,五个环节</h2>
+
+<pre><code>┌─ 1 期望生成 ─────────────────────────────────────────────┐
+│  commander / navigator(任务)· manual_control(手动摇杆)   │
+│      ↓ 发布                                                │
+│  vehicle_attitude_setpoint      姿态期望(四元数+推力)      │
+└───────────────────────────────────────────────────────────┘
+                      ↓
+┌─ 2 姿态环(外环)· mc_att_control ────────────────────────┐
+│  订阅: vehicle_attitude_setpoint + vehicle_attitude        │
+│  发布: vehicle_rates_setpoint   角速度期望      [P 控制]   │
+│  源码: mc_att_control.hpp:113(回调) :115(发布)            │
+└───────────────────────────────────────────────────────────┘
+                      ↓
+┌─ 3 角速度环(内环)· mc_rate_control ─────────────────────┐
+│  订阅: vehicle_rates_setpoint + vehicle_angular_velocity   │
+│  发布: vehicle_thrust_setpoint + vehicle_torque_setpoint   │
+│  源码: mc_rate_control/MulticopterRateControl.cpp          │
+│        :126(回调入口) :260/:264(发布)  [PID,最快]          │
+└───────────────────────────────────────────────────────────┘
+                      ↓
+┌─ 4 控制分配 · control_allocator ────────────────────────┐
+│  订阅: vehicle_thrust_setpoint + vehicle_torque_setpoint   │
+│  发布: actuator_motors(每电机 0~1)                        │
+│  配置: CA_ROTOR*(电机位置/方向,见机架文件)                 │
+│  源码: ControlAllocator.hpp:178-187                        │
+└───────────────────────────────────────────────────────────┘
+                      ↓
+┌─ 5 执行与反馈 ───────────────────────────────────────────┐
+│  pwm_out_sim → gz 电机 → 机体运动 → IMU →                  │
+│  vehicle_angular_velocity / sensor_combined →(回到环 2/3)  │
+└───────────────────────────────────────────────────────────┘</code></pre>
+
+<h2>三个易错点(对照老资料时)</h2>
+
+<table class="map">
+<tr><th>错误认知</th><th>v1.17 真相</th><th>出处</th></tr>
+<tr><td>内环输出是 actuator_controls_0</td><td>是 <strong>vehicle_thrust_setpoint + vehicle_torque_setpoint</strong> 两个 topic</td><td>MulticopterRateControl.hpp:110-111</td></tr>
+<tr><td>控制频率在配置文件里</td><td>由 <strong>SubscriptionCallbackWorkItem</strong> 以上游数据到达唤醒,频率靠 uorb top 实测</td><td>MulticopterRateControl.cpp:67,126</td></tr>
+<tr><td>电机指令由控制器直接算</td><td>控制器只算<strong>推力+力矩</strong>,电机分配是 control_allocator 的事</td><td>ControlAllocator.hpp:178-187</td></tr>
+</table>
+
+<h2>实测记录表(课堂上填)</h2>
+
+<table class="map">
+<tr><th>topic</th><th>uorb top 实测 Hz</th><th>悬停时观察到的值</th></tr>
+<tr><td>vehicle_attitude_setpoint</td><td>____</td><td>滚转/俯仰期望 ≈ 0</td></tr>
+<tr><td>vehicle_rates_setpoint</td><td>____</td><td>xyz 期望 ≈ 0</td></tr>
+<tr><td>vehicle_angular_velocity</td><td>____</td><td>有微小噪声非零</td></tr>
+<tr><td>vehicle_thrust_setpoint</td><td>____</td><td>xyz[2] ≈ <strong>-0.60</strong>(MPC_THR_HOVER)</td></tr>
+<tr><td>vehicle_torque_setpoint</td><td>____</td><td>xyz 在 0 附近抖动</td></tr>
+<tr><td>actuator_motors</td><td>____</td><td>control[0..3] ≈ 0.6 附近</td></tr>
+<tr><td>lesson_report(你的 1 Hz 模块)</td><td>____</td><td>对照用:链路里最慢的"蜗牛"</td></tr>
+</table>
+
+<h2>内环 PID 相关参数(调参入口)</h2>
+
+<table class="map">
+<tr><th>参数</th><th>默认</th><th>作用</th></tr>
+<tr><td>MC_ROLLRATE_P / I / D</td><td>0.15 / 0.2 / 0.003</td><td>滚转角速度环 PID(mc_rate_control_params.c:51)</td></tr>
+<tr><td>MC_PITCHRATE_P / I / D</td><td>0.15 / 0.2 / 0.003</td><td>俯仰角速度环 PID</td></tr>
+<tr><td>MC_YAWRATE_P / I</td><td>0.2 / 0.1</td><td>偏航角速度环 PI</td></tr>
+<tr><td>MC_ROLL_P / MC_PITCH_P</td><td>6.5 / 6.0</td><td>外环姿态 P 增益</td></tr>
+<tr><td>MPC_THR_HOVER</td><td>0.60(x500)</td><td>悬停推力估计,机架文件设</td></tr>
+</table>
+
+<p>官方全景图(可交互):<a href="https://docs.px4.io/v1.17/en/middleware/uorb_graph.html">uORB Graph</a> · 分配数学:<a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">Control Allocation</a>。本表与官方图冲突时,以本仓库源码行号为准。</p>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0008-control-chain.html">第 8 课 · 控制链路</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="roadmap.html">课程地图</a></span>
+</footer>
+
+</body>
+</html>

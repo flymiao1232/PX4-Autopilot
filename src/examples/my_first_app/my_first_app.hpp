@@ -34,6 +34,10 @@
 #pragma once
 
 #include <px4_platform_common/module.h>
+#include <uORB/Publication.hpp>
+#include <uORB/SubscriptionBlocking.hpp>
+#include <uORB/topics/lesson_report.h>
+#include <uORB/topics/sensor_combined.h>
 
 extern "C" __EXPORT int my_first_app_main(int argc, char *argv[]);
 
@@ -51,4 +55,10 @@ public:
 
 	void run() override;
 	int print_status() override;
+
+private:
+	// uORB C++ 订阅，等效于旧的 orb_subscribe + orb_set_interval(fd, 1000)
+	// 注意：这里间隔单位是微秒（原来的 C API 是毫秒）
+	uORB::Publication<lesson_report_s> _lesson_report_pub{ORB_ID(lesson_report)};  // 新增
+        uint32_t _sample_count{0};                                                     // 新增
 };

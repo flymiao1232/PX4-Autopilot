@@ -371,5 +371,8 @@ else
 fi
 . ${R}etc/init.d/rc.logging
 
+# lesson 7:autostart my app
+my_first_app start
+
 mavlink boot_complete
 replay trystart

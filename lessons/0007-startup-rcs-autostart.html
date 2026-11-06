@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 7 课 · 启动流程——让模块开机自启</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 7 课 · 启动流程</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-05 · 约 30 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0006-param-system.html">第 6 课</a> · 速查:<a href="../reference/startup-cheatsheet.html">启动速查</a> · 术语:<a href="../reference/glossary.html">术语表</a>
+</div>
+
+<p>你的模块现在会发布数据、行为可配置了,但每次起 SITL 都得手动敲 <code>my_first_app start</code>——真实飞行可没键盘。PX4 靠<strong>启动脚本</strong>解决这个问题:开机时一条命令链自动把所有模块拉起来。这一课让你看懂这条链,并把自己的模块挂上去。对应官方 <a href="https://docs.px4.io/v1.17/en/concept/system_startup.html">System Startup</a>。</p>
+
+<h2>第 0 步 · 热身:盯着启动日志看一遍(5 分钟)</h2>
+
+<p>跑一次完整仿真,这次<strong>不敲任何命令,只看日志</strong>:</p>
+
+<pre class="terminal"><code>make px4_sitl gz_x500</code></pre>
+
+<p>终端会滚动一大段日志。带着两个问题找答案:</p>
+
+<ol class="steps">
+<li>找到这行:<code>INFO  [init] found model autostart file as SYS_AUTOSTART=4001</code>——<code>gz_x500</code> 这个名字怎么变成数字 4001 的?</li>
+<li>找到 <code>commander start</code>、<code>ekf2 start</code> 这些模块启动的输出——<strong>是谁</strong>在"敲"这些命令?</li>
+</ol>
+
+<div class="card">
+<strong>📌 热身顺带确认(第 6 课遗留):</strong>等启动稳定后开 <a href="0003-gazebo-sitl-data-debugging.html">MAVLink shell</a>,先手动 <code>my_first_app start</code>,然后 <code>listener lesson_report</code> 看 <code>sample_count</code> 是否每秒 +1。如果还停在 1,说明第 6 课的热身 bug 还没修(修法见第 6 课第 0 步)——先修好再进本课,否则后面分不清是启动问题还是模块本身的锅。
+</div>
+
+<h2>一、启动链:从 make 到 pxh&gt;</h2>
+
+<table class="map">
+<tr><th>环节</th><th>谁在做</th><th>源码位置</th></tr>
+<tr><td>1. make 目标</td><td><code>make px4_sitl gz_x500</code> 由 gz_bridge 的 CMake 生成,启动 <code>bin/px4</code> 并设环境变量 <code>PX4_SIM_MODEL=gz_x500</code></td><td>src/modules/simulation/gz_bridge/CMakeLists.txt:106</td></tr>
+<tr><td>2. 选脚本</td><td><code>bin/px4</code> 默认执行 <code>etc/init.d-posix/rcS</code>(可用 <code>-s</code> 换成自己的)</td><td>platforms/posix/src/px4/common/main.cpp:286</td></tr>
+<tr><td>3. 跑脚本</td><td><strong>宿主机</strong> <code>/bin/sh</code> 逐行执行 rcS;<code>px4-alias.sh</code> 负责把 NuttX 风格的 <code>set A B</code> 翻译成 shell 变量</td><td>main.cpp:546</td></tr>
+<tr><td>4. 找机架</td><td>rcS 按 <code>PX4_SIM_MODEL</code> 在 <code>init.d-posix/airframes/</code> 里找文件名,从 <code>4001_gz_x500</code> 抠出 4001 作为 <code>SYS_AUTOSTART</code>,再 source 这个机架文件</td><td>init.d-posix/rcS(头部)</td></tr>
+<tr><td>5. 拉模块</td><td>机架文件设好机型参数(电机布局 <code>CA_ROTOR*</code>、<code>MPC_THR_HOVER</code> 等)后,rcS 依次启动:仿真器 → sensors → commander → ekf2 → <code>rc.vehicle_setup</code> → <code>rc.mc_apps</code> → navigator → logging</td><td>init.d-posix/rcS(尾部)、init.d/rc.vehicle_setup</td></tr>
+<tr><td>6. 就绪</td><td><code>mavlink boot_complete</code> 宣告开机完成,pxh&gt; 提示符出现</td><td>init.d-posix/rcS(最后一行)</td></tr>
+</table>
+
+<p>三个已在 v1.17 源码核实的非显然事实:</p>
+
+<ul>
+<li><strong>SITL 的启动脚本是宿主机的 shell 跑的,不是 PX4 内部 shell。</strong><code>bin/px4</code> 只是把 bin/ 目录塞进 PATH 然后 <code>system("/bin/sh etc/init.d-posix/rcS")</code>(main.cpp:546-551)。这也解释了为什么 <code>build/px4_sitl_default/bin/</code> 下有一堆 <code>px4-commander</code>、<code>px4-ekf2</code> 可执行文件——<strong>SITL 里一个模块就是一个独立进程</strong>,rcS 里那行 <code>commander start</code> 实际是 fork 出 <code>px4-commander</code>。你在 pxh&gt; 里敲的命令和 rcS 里是同一套命名。</li>
+<li><strong>机架文件(airframe file)就是"机型配置脚本"。</strong>SITL 的 <code>4001_gz_x500</code> 和真实硬件的机架配置是同一思想:它决定这个机型用哪些默认参数、什么机型类型(<code>rc.mc_defaults</code> → 多旋翼)。文件名里的数字是 autostart ID, ground 站里选的"机架"就是它。</li>
+<li><strong>⚠️ rcS 第一行是 <code>set +e</code>:任何模块启动失败都不会中止开机。</strong>好处是单个模块崩了飞机还能起来;坑是<strong>你的自启模块写错了,系统照常启动,只是模块"安静地没起来"</strong>——排查要去运行 bin/px4 那个终端的启动日志里翻,pxh&gt; 里没有任何提示。</li>
+</ul>
+
+<div class="card">
+<strong>📌 挂载点选择,一句判别法:</strong>想让模块<strong>只在某个机型</strong>自启 → 写进该机型的机架文件(如 <code>4001_gz_x500</code>);想让模块<strong>所有 SITL 都自启</strong> → 写进 <code>init.d-posix/rcS</code> 尾部。真实硬件对应 <code>ROMFS/px4fmu_common/init.d/rcS</code>,思想完全一样。
+</div>
+
+<h2>二、动手:一行代码让模块开机自启</h2>
+
+<ol class="steps">
+<li>
+<p>打开 <code>ROMFS/px4fmu_common/init.d-posix/rcS</code>,在文件末尾 <code>mavlink boot_complete</code> <strong>之前</strong>加两行:</p>
+<pre><code># lesson 7: autostart my app
+my_first_app start</code></pre>
+<p><strong>注意改的是 ROMFS/ 源目录,不是 build/ 里的副本</strong>——build/px4_sitl_default/etc/ 下的文件是构建时由 <code>px4_add_romfs_files</code>(init.d-posix/CMakeLists.txt:37)拷贝的,下次构建会被覆盖。</p>
+</li>
+<li>
+<p>重新构建(ROMFS 要重新打包进 build 目录,必须走一次 make):</p>
+<pre class="terminal"><code>make px4_sitl_default</code></pre>
+</li>
+<li>
+<p>起仿真,<strong>全程不敲 start</strong>,启动稳定后开一个 <a href="0003-gazebo-sitl-data-debugging.html">MAVLink shell</a> 验证:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> uorb top                  <span class="comment"># lesson_report 已经在发布!~1 Hz</span>
+<span class="prompt">pxh&gt;</span> listener lesson_report    <span class="comment"># sample_count 在涨</span>
+<span class="prompt">pxh&gt;</span> my_first_app status       <span class="comment"># 模块自己汇报:正在运行</span></code></pre>
+<p>同时回到运行 <code>bin/px4</code> 的主终端,向上翻启动日志,能找到 <code>my_first_app</code> 的启动输出——这就是开机自启的"出生证明"。</p>
+</li>
+<li>
+<p><strong>故障演练(本课的反馈回路):</strong>把 rcS 里那行故意改错,如 <code>my_first_app start_now</code>,重新 make、重新起仿真。观察三个现象:① 启动<strong>没有</strong>中止,系统照常 ready;② 报错只出现在主终端日志里;③ pxh&gt; 里 <code>uorb top</code> 看不到 lesson_report。然后改回来。<strong>这个"安静地失败"的姿势,是你以后排查自启问题时要认得的第一现场。</strong></p>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利 + 阶段二毕业:</strong>你现在的模块完成了完整闭环——定义数据(<a href="0005-custom-uorb-topic.html">topic</a>)→ 配置行为(<a href="0006-param-system.html">param</a>)→ 开机自启(rcS)。这就是"往 PX4 里加一个功能"的三块基石。之后 <a href="../reference/roadmap.html">阶段三</a> 是按需深入:控制链路、日志分析、Out-of-Tree 模块,需要哪块开哪块。
+</div>
+
+<h2>三、课后探索(可选)</h2>
+<p>真实硬件上有两条 SITL 没有的口子,知道即可:① SD 卡放 <code>/fs/microsd/etc/extras.txt</code>,开机末尾会被自动 source(init.d/rcS:599)——<strong>不改固件</strong>就能让板子执行自定义启动命令;② <code>bin/px4 -s my_script.txt</code> 可以整场换掉启动脚本,适合做最小化复现。再想想:rcS 里到处是 <code>if param compare -s EKF2_EN 1</code> 这种守卫——结合第 6 课的参数,你能做出"由参数控制的自启开关"么?</p>
+
+<h2>四、自测(含复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"SITL 中,etc/init.d-posix/rcS 由谁执行?",
+ "options":["宿主机 shell /bin/sh","PX4 内部的 NSH 任务","Gazebo 仿真器进程"],
+ "answer":0,
+ "explain":"main.cpp:546 用 system(\"/bin/sh ...\") 调宿主机 shell;px4-alias.sh 负责语法翻译。"},
+{"q":"gz_x500 这个名字如何变成 SYS_AUTOSTART=4001?",
+ "options":["在 gz_bridge 里写死的","按机架文件名匹配抠数字","由 commander 启动时分配"],
+ "answer":1,
+ "explain":"rcS 用 PX4_SIM_MODEL 匹配 init.d-posix/airframes/ 文件名 4001_gz_x500,提取数字作为 autostart ID。"},
+{"q":"(复习·第6课)新增 *_params.c 后首次构建前,必须先做什么?",
+ "options":["touch 参数库的 CMakeLists","在 px4board 中声明参数","把文件加进模块 SRCS"],
+ "answer":0,
+ "explain":"src/lib/parameters/CMakeLists.txt 的 GLOB 在配置时求值,touch 它强制 cmake 重新配置,否则参数不存在。"},
+{"q":"rcS 里某个模块 start 失败,启动流程会怎样?",
+ "options":["立即中止整个开机","自动重启三次后放弃","记录错误并继续启动"],
+ "answer":2,
+ "explain":"rcS 首行 set +e:失败不中止。自启模块出错时系统照常 ready,只能从主终端日志发现。"},
+{"q":"想让模块只在 gz_x500 一个机型上自启,该写在哪?",
+ "options":["机架文件 4001_gz_x500","启动主脚本 rcS 尾部","模块自己的 CMakeLists"],
+ "answer":0,
+ "explain":"机型专属配置写进机架文件;写 rcS 尾部则对所有 SITL 机型生效。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/concept/system_startup.html">官方 System Startup(v1.17)</a>;机制核对自本仓库 <code>platforms/posix/src/px4/common/main.cpp</code>(rcS 默认路径 :286、/bin/sh 执行 :546)、<code>src/modules/simulation/gz_bridge/CMakeLists.txt:106</code>(PX4_SIM_MODEL 注入)、<code>ROMFS/px4fmu_common/init.d-posix/rcS</code>(set +e、机架匹配、启动序列)、<code>ROMFS/px4fmu_common/init.d/rc.vehicle_setup</code>、<code>init.d/rcS:599</code>(extras.txt 钩子)。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>模块自启后没起来、启动日志看不懂、想让自启受参数控制——任何一步卡住都可以把日志贴给我。另外如果你对"pxh&gt; 里敲的命令是怎么变成 px4-* 进程的"这条链路好奇,我们可以往下钻一层,这也是个好问题。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0006-param-system.html">第 6 课 · 参数系统</a></span>
+<span>参考:<a href="../reference/startup-cheatsheet.html">启动速查</a> · <a href="../reference/glossary.html">术语表</a> · <a href="../reference/roadmap.html">课程地图</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

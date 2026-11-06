@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 8 课 · 控制链路——从期望到电机指令</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>第 8 课 · 控制链路</h1>
+<div class="lesson-meta">
+<span class="mission">Mission:能独立改 PX4 代码</span>
+2026-11-05 · 约 35 分钟 · 路线:<a href="../reference/roadmap.html">课程地图</a> · 上一课:<a href="0007-startup-rcs-autostart.html">第 7 课</a> · 图:<a href="../reference/control-chain.html">控制链路图</a> · 术语:<a href="../reference/glossary.html">术语表</a>
+</div>
+
+<p>阶段三第一课。改控制是"改 PX4"的深水区,而动手前的门票是<strong>看懂数据怎么流</strong>。这一课不写新代码,练一个更值钱的能力:把多旋翼控制链路从官方概念图钉到<strong>你电脑上这个正在跑的 PX4</strong>——每个环节用 uORB 实测、用源码行号定位。对应官方 <a href="https://docs.px4.io/v1.17/en/concept/architecture.html">Flight Stack Architecture</a> 与 <a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">Control Allocation</a>。</p>
+
+<h2>第 0 步 · 热身:未解锁时控制环在跑吗?(5 分钟)</h2>
+
+<p>起 SITL(不起飞、不解锁),直接看:</p>
+
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> uorb top
+<span class="prompt">pxh&gt;</span> listener actuator_motors</code></pre>
+
+<p>两个观察:① 锁定的(没解锁)无人机,<code>actuator_motors.control[]</code> 全为 <strong>0</strong>——控制环其实在跑,只是输出在解锁前被抑制;② <code>uorb top</code> 里 <code>vehicle_rates_setpoint</code>、<code>vehicle_torque_setpoint</code> 这些 topic 都在持续发布。<strong>控制是连续的,解锁只是一个"放行"开关(vehicle_control_mode)。</strong></p>
+
+<h2>一、一条链,五个环节</h2>
+
+<p>对照<a href="../reference/control-chain.html">控制链路图</a>读一遍,核心链条:</p>
+
+<pre><code>vehicle_attitude_setpoint(姿态期望)
+  → mc_att_control(姿态外环,P)          → vehicle_rates_setpoint(角速度期望)
+  → mc_rate_control(角速度内环,PID)     → vehicle_thrust_setpoint + vehicle_torque_setpoint
+  → control_allocator(控制分配)         → actuator_motors(每电机 0~1)
+  → pwm_out_sim → gz 电机 → 机体 → IMU →(回到内环,闭环)</code></pre>
+
+<p>三个已在 v1.17 源码核实的非显然事实:</p>
+
+<ul>
+<li><strong>⚠️ 内环输出不是 actuator_controls_0。</strong>老教程、老论文里"控制器输出 actuator_controls"的写法已过时——v1.17 的 mc_rate_control 发布的是 <code>vehicle_thrust_setpoint</code> + <code>vehicle_torque_setpoint</code><strong>两个</strong> topic(<code>mc_rate_control/MulticopterRateControl.hpp:110-111</code>,发布点在 <code>MulticopterRateControl.cpp:260/264</code>)。查资料对不上时,源码是终审。</li>
+<li><strong>控制环没有"配置文件里的频率",节拍器是数据本身。</strong>每个环用 <code>SubscriptionCallbackWorkItem</code> 订阅上游 topic,数据一到就唤醒自己:<code>mc_att_control</code> 由 <code>vehicle_attitude</code> 唤醒(<code>mc_att_control.hpp:113</code>),<code>mc_rate_control</code> 由 <code>vehicle_angular_velocity</code>(陀螺仪)唤醒(<code>MulticopterRateControl.cpp:126</code>)。所以频率是<strong>量出来的,不是配出来的</strong>——内环最快,级联向下。</li>
+<li><strong>控制器不直接算电机,中间有"控制分配"层。</strong><code>control_allocator</code> 订阅推力+力矩设定点,解一个分配问题:给定 x500 的 4 个电机布局(<code>CA_ROTOR*</code> 参数,第 7 课机架文件里见过),每个电机该转多快(<code>ControlAllocator.hpp:178-187</code>)。换机型只换机架文件,控制器代码一行不动——这就是分层的意义。</li>
+</ul>
+
+<div class="card">
+<strong>📌 读任何 PX4 模块的通用三段式:</strong>① 它的头文件里 <code>uORB::Subscription</code> 是谁(输入);② <code>uORB::Publication</code> 是谁(输出);③ <code>SubscriptionCallbackWorkItem</code> 订阅谁(谁唤醒它)。三段答完,模块在链路中的位置自动浮现。用这个方法读你自己的 my_first_app,它就是:订阅 sensor_combined、发布 lesson_report、靠 px4_poll 定时——没有回调,所以是最慢的 1 Hz。
+</div>
+
+<h2>二、动手:把链路钉在活系统上</h2>
+
+<ol class="steps">
+<li>
+<p>起飞(仅仿真,真机勿试)。在运行 <code>bin/px4</code> 的主终端或 MAVLink shell:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> commander takeoff    <span class="comment"># 观察日志直到 "Takeoff detected"</span></code></pre>
+</li>
+<li>
+<p><strong>预测→实测频率。</strong>先凭"节拍器"原理预测哪环最快,再用 <code>uorb top</code> 实测,把结果填进<a href="../reference/control-chain.html">链路图</a>的实测表。重点看 <code>vehicle_angular_velocity</code>(陀螺仪,内环心跳)、<code>vehicle_torque_setpoint</code> 与 <code>actuator_motors</code>(应当几乎同频——直连)、以及你的 <code>lesson_report</code>(1 Hz,链路里最慢的蜗牛)。</p>
+</li>
+<li>
+<p><strong>悬停数值三连对答案。</strong>悬停稳定后开 <a href="0003-gazebo-sitl-data-debugging.html">MAVLink shell</a> 连续执行:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> listener vehicle_rates_setpoint   <span class="comment"># 滚转/俯仰/偏航期望 ≈ 0</span>
+<span class="prompt">pxh&gt;</span> listener vehicle_thrust_setpoint  <span class="comment"># xyz[2] ≈ -0.60 ← 与 MPC_THR_HOVER 对上了!</span>
+<span class="prompt">pxh&gt;</span> listener actuator_motors          <span class="comment"># control[0..3] 四个值 ≈ 0.6 附近,微抖</span></code></pre>
+<p><code>-0.60</code> 不是巧合:x500 机架文件(<code>init.d-posix/airframes/4001_gz_x500</code>)里 <code>param set-default MPC_THR_HOVER 0.60</code>。<strong>悬停推力 ≈ 悬停油门</strong>,链路理论和你第 7 课的启动链知识在此会师。</p>
+</li>
+<li>
+<p><strong>源码对号。</strong>打开 <code>src/modules/mc_rate_control/MulticopterRateControl.cpp</code>:126 看回调入口,跳到 :260/:264 看发布;再翻 <code>mc_att_control.hpp</code>:113/:115 与 <code>ControlAllocator.hpp</code>:178-187。注意 <code>Run()</code> 的写法和你第 4 课 ModuleBase 学的是同一个模式——阶段二不是白学的。</p>
+</li>
+<li>
+<p>降落收工:</p>
+<pre class="terminal"><code><span class="prompt">pxh&gt;</span> commander land
+<span class="prompt">pxh&gt;</span> commander disarm</code></pre>
+</li>
+</ol>
+
+<div class="card win">
+<strong>✅ 本课的胜利:</strong>你手里现在有三份互相咬合的证据——官方概念图、uORB 实测数据、源码行号。下次读任何陌生模块(比如想改 ekf2 或加避障),用"三段式"十分钟就能说出它在链路里的位置。这是改控制代码之前最重要的防御性技能:<strong>先知道数据从哪来,再谈改它。</strong>
+</div>
+
+<h2>三、课后探索(可选)</h2>
+<p>重启 SITL 后试试调内环:<code>param set MC_ROLLRATE_P 0.05</code>(默认 0.15,削掉 2/3),再 <code>commander takeoff</code>——观察飞行器姿态的摆动和 <code>rate_ctrl_status</code> 的变化,体会"参数即控制律"。玩完 <code>param reset MC_ROLLRATE_P</code> 恢复。更进一步:官方 <a href="https://docs.px4.io/v1.17/en/middleware/uorb_graph.html">uORB Graph</a> 页面把我们走通的这条链画成了可交互全图,找找你的 lesson_report 在不在上面(提示:它不在官方构建的图里,因为那是主分支的——这本身就是个值得想一想的发现)。</p>
+
+<h2>四、自测(含复习)</h2>
+
+<div class="quiz" data-shuffle="true" data-questions='[
+{"q":"v1.17 中,mc_rate_control 的输出是什么?",
+ "options":["归一化电机指令","推力与力矩设定点","姿态角速度指令"],
+ "answer":1,
+ "explain":"vehicle_thrust_setpoint + vehicle_torque_setpoint 双 topic(MulticopterRateControl.cpp:260/264);电机归一化指令是 control_allocator 的产物。"},
+{"q":"控制环的运行频率由什么决定?",
+ "options":["固定周期的定时器","px4board 里的配置","上游数据到达的回调"],
+ "answer":2,
+ "explain":"SubscriptionCallbackWorkItem 以上游 topic 到达唤醒,频率靠 uorb top 实测,不是配置出来的。"},
+{"q":"(复习·第7课)机架文件名 4001_gz_x500 中的 4001 是?",
+ "options":["SYS_AUTOSTART 的值","旋翼数量的编码","Gazebo 世界的编号"],
+ "answer":0,
+ "explain":"文件名 = <autostart ID>_<模型名>,rcS 从 PX4_SIM_MODEL 匹配文件名并提取 ID。"},
+{"q":"x500 悬停时,vehicle_thrust_setpoint 的 z 分量约为?",
+ "options":["恰好为 0","约负 0.6","恒等于 1"],
+ "answer":1,
+ "explain":"≈ -MPC_THR_HOVER = -0.60,机架文件 4001_gz_x500 中的默认值,实测可对答案。"},
+{"q":"(复习·第6课)rcS 里 param set-default 的语义是?",
+ "options":["无条件覆盖当前值","仅参数未存过值时生效","写入后立即断电保存"],
+ "answer":1,
+ "explain":"set-default 只在参数无存储值时写入;param set 才是强制覆盖——机架文件全用它,所以用户自定义参数永不被机架默认值冲掉。"}
+]'></div>
+
+<h2>五、本课来源</h2>
+<p>主要来源:<a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">官方 Control Allocation(v1.17)</a>、<a href="https://docs.px4.io/v1.17/en/middleware/uorb_graph.html">uORB Graph</a>;机制核对自本仓库 <code>src/modules/mc_rate_control/</code>(MulticopterRateControl.hpp:110-111、.cpp:126/260/264)、<code>src/modules/mc_att_control/mc_att_control.hpp</code>:113/:115、<code>src/modules/control_allocator/ControlAllocator.hpp</code>:178-187、<code>ROMFS/px4fmu_common/init.d-posix/airframes/4001_gz_x500</code>(MPC_THR_HOVER 0.60)、<code>mc_rate_control_params.c</code>(MC_ROLLRATE_* 默认值)。</p>
+
+<div class="tip-teacher">
+<strong>💬 我是你的老师。</strong>哪个环节的数据对不上预期、uorb top 频率看着不对、想搞懂 PID 三个参数各自的作用——都可以把实测输出贴给我。另外如果你对"为什么内环用角速度而不是姿态直接做 PID"这种控制理论问题好奇,我们也可以开个小灶。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="0007-startup-rcs-autostart.html">第 7 课 · 启动流程</a></span>
+<span>参考:<a href="../reference/control-chain.html">控制链路图</a> · <a href="../reference/glossary.html">术语表</a> · <a href="../reference/roadmap.html">课程地图</a></span>
+</footer>
+
+<script src="../assets/quiz.js"></script>
+</body>
+</html>

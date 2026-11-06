@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>参考 · 参数系统速查</title>
+<link rel="stylesheet" href="../assets/lesson.css">
+</head>
+<body>
+
+<h1>参考 · 参数系统速查</h1>
+<div class="lesson-meta">打印友好 · 第 6 课配套 · 所有课程统一术语见<a href="glossary.html">术语表</a></div>
+
+<h2>一、生命周期一页图</h2>
+
+<table class="map">
+<tr><th>环节</th><th>位置</th><th>关键事实</th></tr>
+<tr><td>定义</td><td><code>模块目录/*_params.c</code></td><td>只有 doxygen 注释 + <code>PARAM_DEFINE_*</code>,被解析<strong>不编译</strong>,无需 include</td></tr>
+<tr><td>收集</td><td><code>src/lib/parameters/CMakeLists.txt:119</code></td><td><code>file(GLOB_RECURSE src/*params.c)</code> 在 <strong>cmake 配置时</strong>求值 → 新文件必须 <code>touch src/lib/parameters/CMakeLists.txt</code> 后重配</td></tr>
+<tr><td>生成</td><td><code>build/.../px4_parameters.hpp</code></td><td><code>px_process_params.py</code> 解析 → parameters.xml → 参数存储代码</td></tr>
+<tr><td>读取(C API)</td><td><code>#include &lt;parameters/param.h&gt;</code></td><td><code>param_t h = param_find("NAME");</code> 查不到返回 <code>PARAM_INVALID</code>(0xffff);<code>param_get(h, &amp;val);</code></td></tr>
+<tr><td>读取(C++ 主流)</td><td><code>px4_platform_common/module_params.h</code></td><td>继承 ModuleParams + <code>DEFINE_PARAMETERS</code> + 订阅 <code>parameter_update</code></td></tr>
+<tr><td>shell 操作</td><td>PX4 shell</td><td><code>param show 前缀*</code> · <code>param set NAME val</code> · <code>param save</code> · <code>param reset NAME</code></td></tr>
+</table>
+
+<h2>二、params.c 最小模板</h2>
+
+<pre><code>/**
+ * 参数的一句话说明
+ *
+ * 更详细的多行说明(给地面站看)
+ *
+ * @boolean            <span class="comment" style="color:#777"># 或 @min / @max / @unit / @group 模块名</span>
+ * @group My Module
+ */
+PARAM_DEFINE_INT32(MOD_PREFIX_NAME, 1);   <span class="comment" style="color:#777"># 或 PARAM_DEFINE_FLOAT(...)</span></code></pre>
+
+<ul>
+<li>参数名 <strong>≤ 16 字符</strong>(<code>px4params/srcparser.py:370</code>),全大写 + 模块前缀,如 <code>LR5_PUB_EN</code>、<code>LND_FLIGHT_T_HI</code>、<code>UXRCE_DDS_PRT</code></li>
+<li>宏第二个参数 = 默认值,也是 <code>param reset</code> 回到的值</li>
+<li>参考实例:<code>src/modules/zenoh/zenoh_params.c</code>(最小)、<code>src/modules/land_detector/land_detector_params.c</code>(全注解)</li>
+</ul>
+
+<h2>三、常见症状 → 对策</h2>
+
+<table class="map">
+<tr><th>症状</th><th>最可能原因</th><th>对策</th></tr>
+<tr><td><code>param_find</code> 返回 PARAM_INVALID</td><td>新 params.c 后 cmake 没重配,GLOB 未刷新</td><td><code>touch src/lib/parameters/CMakeLists.txt &amp;&amp; make</code>;不行则 <code>make clean</code></td></tr>
+<tr><td><code>param show</code> 找不到参数</td><td>同上;或文件名不匹配 <code>*params.c</code></td><td>检查文件名后缀;重配</td></tr>
+<tr><td><code>param set</code> 后模块行为不变</td><td>值在 start 时只读了一次</td><td>循环内每轮 <code>param_get</code>,或订阅 parameter_update</td></tr>
+<tr><td>param set 重启后丢失</td><td>没保存</td><td><code>param save</code>(SITL 存在 build 目录的虚拟存储)</td></tr>
+</table>
+
+<h2>四、参数 vs topic(判别法)</h2>
+
+<div class="card">
+<strong>参数 = 配置</strong>:慢变、有默认值、可持久化,回答"模块<strong>应该怎么</strong>工作"。<br>
+<strong>topic = 数据</strong>:快变、last-value-cached,回答"系统<strong>正在</strong>发生什么"。<br>
+拿不准就问:改了之后需要断电保存吗?需要 → 参数。
+</div>
+
+<footer class="lesson-nav">
+<span>← <a href="../lessons/0006-param-system.html">第 6 课 · 参数系统</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="roadmap.html">课程地图</a></span>
+</footer>
+
+</body>
+</html>

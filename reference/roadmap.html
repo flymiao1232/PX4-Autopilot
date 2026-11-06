@@ -55,38 +55,61 @@
 <td><a href="../lessons/0005-custom-uorb-topic.html">第 5 课 · 自定义 uORB topic</a></td>
 <td>新增 .msg、跨模块传自定义数据</td>
 <td><a href="https://docs.px4.io/v1.17/en/middleware/uorb.html">uORB Messaging</a></td>
+<td>✅ 已完成(2026-11-04)</td>
+</tr>
+<tr>
+<td><a href="../lessons/0006-param-system.html">第 6 课 · 参数系统</a></td>
+<td>给模块加 param,运行时可调可存</td>
+<td><a href="https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html">Parameters &amp; Configs</a></td>
+<td>✅ 已完成(2026-11-05)</td>
+</tr>
+<tr>
+<td><a href="../lessons/0007-startup-rcs-autostart.html">第 7 课 · 启动流程</a></td>
+<td>rcS 启动脚本;让模块开机自启</td>
+<td><a href="https://docs.px4.io/v1.17/en/concept/system_startup.html">System Startup</a></td>
+<td>✅ 已完成(2026-11-05)</td>
+</tr>
+</table>
+
+<h2>阶段三 · 改得好(进阶主线,2026-11-05 由学员确认四项全学)</h2>
+
+<table class="map">
+<tr><th>课</th><th>技能目标</th><th>对应官方文档(v1.17)</th><th>状态</th></tr>
+<tr>
+<td><a href="../lessons/0008-control-chain.html">第 8 课 · 控制链路</a></td>
+<td>徒手画出多旋翼控制链;uORB 实测 + 源码行号逐环验证</td>
+<td><a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">Control Allocation</a> · <a href="https://docs.px4.io/v1.17/en/middleware/uorb_graph.html">uORB Graph</a></td>
 <td>✅ 已发布</td>
 </tr>
 <tr>
-<td>第 6 课 · 参数系统</td>
-<td>给模块加 param,运行时可调可存</td>
-<td><a href="https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html">Parameters &amp; Configs</a></td>
+<td>第 9 课 · 仿真深入</td>
+<td>gz-transport 数据通路、自定义世界/机型、headless 与多机、SIM_GZ 参数</td>
+<td><a href="https://docs.px4.io/v1.17/en/sim_gazebo_gz/">Gazebo Simulation</a> · <a href="https://docs.px4.io/v1.17/en/sim_gazebo_gz/vehicles.html">Gazebo Vehicles</a></td>
 <td>预告</td>
 </tr>
 <tr>
-<td>第 7 课 · 启动流程</td>
-<td>rcS 启动脚本;让模块开机自启</td>
-<td><a href="https://docs.px4.io/v1.17/en/concept/system_startup.html">System Startup</a></td>
+<td>第 10 课 · 日志分析</td>
+<td>ULog 结构、logger 配置、pyulog/Flight Review 事后分析</td>
+<td><a href="https://docs.px4.io/v1.17/en/dev_log/logging.html">Logging</a> · <a href="https://docs.px4.io/v1.17/en/log/flight_log_analysis.html">Flight Log Analysis</a></td>
+<td>预告</td>
+</tr>
+<tr>
+<td>第 11 课 · Out-of-Tree 模块</td>
+<td>不动主仓库,独立维护/发布自己的 PX4 模块</td>
+<td><a href="https://docs.px4.io/v1.17/en/advanced/out_of_tree_modules.html">Out-of-Tree Modules</a></td>
 <td>预告</td>
 </tr>
 </table>
 
-<h2>阶段三 · 改得好(进阶,按实际需要触发)</h2>
-
-<ul>
-<li>控制链路深读(mc_rate_control → control_allocator):结合 <a href="https://docs.px4.io/v1.17/en/concept/control_allocation.html">Control Allocation</a></li>
-<li>日志与事后分析:ULog、<a href="https://docs.px4.io/v1.17/en/dev_log/logging.html">Logging</a>、Flight Review</li>
-<li>Out-of-Tree 模块:不动主仓库发布自己的模块</li>
-<li>MAVLink 自定义消息(需要与地面站通信时)</li>
-</ul>
+<p>按需加课:MAVLink 自定义消息(需要与地面站通信时触发);控制理论小灶(内环/外环/PID 直觉)。</p>
 
 <div class="card info">
 <strong>怎么用这张地图:</strong>每课结束时回到这里打勾。如果某课对应官方页面读不懂,直接问你的老师(对话里的 Claude),而不是自己硬啃。
 </div>
 
 <footer class="lesson-nav">
-<span>← <a href="../lessons/0005-custom-uorb-topic.html">第 5 课</a></span>
-<span><a href="glossary.html">术语表</a> · <a href="../MISSION.md">MISSION.md</a></span>
+<span>← <a href="../lessons/0008-control-chain.html">第 8 课</a></span>
+<span><a href="glossary.html">术语表</a> · <a href="control-chain.html">控制链路图</a> · <a href="startup-cheatsheet.html">启动速查</a> · <a href="../MISSION.md">MISSION.md</a></span>
 </footer>
 
 </body>

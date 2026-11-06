@@ -24,6 +24,14 @@
 - [Parameters & Configs](https://docs.px4.io/v1.17/en/advanced/parameters_and_configurations.html) — 参数系统。用于:给自定义模块加可配置参数。
 - [System Startup](https://docs.px4.io/v1.17/en/concept/system_startup.html) — rcS 启动脚本流程。用于:让模块开机自启。
 
+### 阶段三(对应第 8–11 课)
+- [Control Allocation](https://docs.px4.io/v1.17/en/concept/control_allocation.html) — 控制分配数学。用于:第 8 课、改机型/混控。
+- [uORB Graph](https://docs.px4.io/v1.17/en/middleware/uorb_graph.html) — 模块间数据流可交互全图。用于:改代码前查"谁订阅/发布谁"。
+- [Gazebo Vehicles](https://docs.px4.io/v1.17/en/sim_gazebo_gz/vehicles.html) — 自定义仿真机型/世界。用于:第 9 课仿真深入。
+- [Flight Log Analysis](https://docs.px4.io/v1.17/en/log/flight_log_analysis.html) — ULog 与 Flight Review。用于:第 10 课日志分析。
+- [Out-of-Tree Modules](https://docs.px4.io/v1.17/en/advanced/out_of_tree_modules.html) — 不动主仓库发布模块。用于:第 11 课。
+- [pyulog 文档](https://pyulog.readthedocs.io/) — ULog 解析库。用于:第 10 课编程式读日志。
+
 ### Debugging(贯穿全程)
 - [Sensor/uORB Topic Debugging](https://docs.px4.io/v1.17/en/debug/sensor_uorb_topic_debugging.html) — uorb/listener 调试命令。
 - [Consoles/Shells](https://docs.px4.io/v1.17/en/debug/consoles.html) — PX4 shell / MAVLink shell 的区别与用法。
